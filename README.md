@@ -50,6 +50,10 @@ This project provides a Telegram bot that can answer questions using a FAISS vec
     -   Copy the contents of `service_account.example.json` into `service_account.json`.
     -   Fill in the values for the fields in this file with your Google Cloud service account credentials. You can get these credentials by following the instructions in the [Google Cloud documentation](https://cloud.google.com/docs/authentication/getting-started).
 
+3.  **Set up your Google Sheet:**
+    -   The bot uses the **first sheet (tab)** for the AI's knowledge base. It must have columns named `Question` and `Answer` (or `Вопрос` and `Ответ`).
+    -   The bot uses the **second sheet (tab)** for user data. It must have columns named `name`, `phone`, and `email`.
+
 ## Running the Application
 
 -   **Windows:**
