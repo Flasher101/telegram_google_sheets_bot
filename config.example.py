@@ -1,0 +1,15 @@
+# config.example.py
+
+# Telegram Bot Token from @BotFather
+TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+
+# Google Sheets ID from the URL of your Google Sheet
+# Example: https://docs.google.com/spreadsheets/d/1234567890abcdefghijklmnopqrstuvwxyz/edit#gid=0
+# GOOGLE_SHEETS_ID is "1234567890abcdefghijklmnopqrstuvwxyz"
+GOOGLE_SHEETS_ID = "YOUR_GOOGLE_SHEETS_ID"
+
+# Path to the FAISS index file (will be created automatically)
+FAISS_INDEX_PATH = "faiss_index"
+
+# URL of the AI server's /ask endpoint
+AI_SERVER_URL = "http://localhost:8000/ask"
