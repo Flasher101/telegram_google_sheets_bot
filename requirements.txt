@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+gspread
+oauth2client
+sentence-transformers
+faiss-cpu
+aiogram==2.25.1
+requests
+numpy
+aiohttp==3.8.6
