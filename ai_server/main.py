@@ -2,12 +2,25 @@
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-# Используем относительные импорты, т.к. файлы в одном 'модуле'
-from .g_sheets import get_all_records 
-from .vector_store import build_or_load_index, search_index
+from ai_server.g_sheets import get_all_records
+from ai_server.vector_store import build_or_load_index, search_index
 import threading
 import time
 import uvicorn
+import logging
+from logging.handlers import RotatingFileHandler
+
+# --- Logging Setup ---
+log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+log_file = 'logs/ai_server.log'
+log_handler = RotatingFileHandler(log_file, maxBytes=1024*1024*5, backupCount=5)
+log_handler.setFormatter(log_formatter)
+log_handler.setLevel(logging.INFO)
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.addHandler(log_handler)
+logger.addHandler(logging.StreamHandler())
 
 app = FastAPI(title="AI Server (Google Sheets + FAISS)")
 
@@ -17,15 +30,14 @@ class Query(BaseModel):
 def update_index_periodically():
     """Фоновая задача для обновления индекса раз в час"""
     while True:
-        # Ждем 1 час (3600 секунд) ПЕРЕД обновлением
-        time.sleep(3600) 
-        print("Фоновое обновление: Загрузка данных из Google Sheets...")
+        time.sleep(3600)
+        logger.info("Фоновое обновление: Загрузка данных из Google Sheets...")
         records = get_all_records()
         if records:
             build_or_load_index(records)
-            print(f"Фоновое обновление: Индекс обновлен ({len(records)} записей).")
+            logger.info(f"Фоновое обновление: Индекс обновлен ({len(records)} записей).")
         else:
-            print("Фоновое обновление: Не удалось загрузить записи, индекс не обновлен.")
+            logger.warning("Фоновое обновление: Не удалось загрузить записи, индекс не обновлен.")
 
 @app.on_event("startup")
 def startup_event():
@@ -34,15 +46,14 @@ def startup_event():
     1. Сразу загружаем данные и строим индекс.
     2. Запускаем фоновую задачу для периодических обновлений.
     """
-    print("Сервер запускается... Первоначальное создание индекса.")
+    logger.info("Сервер запускается... Первоначальное создание индекса.")
     records = get_all_records()
     if records:
         build_or_load_index(records)
-        print(f"Индекс успешно создан при запуске ({len(records)} записей).")
+        logger.info(f"Индекс успешно создан при запуске ({len(records)} записей).")
     else:
-        print("Не удалось загрузить данные при старте. Повторная попытка через 1 час.")
-    
-    # Запускаем фоновую задачу в отдельном потоке
+        logger.warning("Не удалось загрузить данные при старте. Повторная попытка через 1 час.")
+
     thread = threading.Thread(target=update_index_periodically, daemon=True)
     thread.start()
 
@@ -51,10 +62,13 @@ def ask_question(query: Query):
     """
     Основной эндпоинт, куда обращается бот.
     """
+    logger.info(f"Получен вопрос: {query.question}")
     if not query.question:
+        logger.error("Получен пустой вопрос.")
         raise HTTPException(status_code=400, detail="Вопрос не может быть пустым")
-        
+
     answer = search_index(query.question)
+    logger.info(f"Ответ: {answer}")
     return {"answer": answer}
 
 @app.get("/health")
@@ -63,6 +77,5 @@ def health_check():
     return {"status": "ok"}
 
 if __name__ == "__main__":
-    # Позволяет запускать файл напрямую: python ai_server/main.py
-    print("Запуск FastAPI сервера на http://127.0.0.1:8000")
+    logger.info("Запуск FastAPI сервера на http://127.0.0.1:8000")
     uvicorn.run(app, host="127.0.0.1", port=8000)
