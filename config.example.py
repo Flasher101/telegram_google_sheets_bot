@@ -11,5 +11,5 @@ GOOGLE_SHEETS_ID = "YOUR_GOOGLE_SHEETS_ID"
 # Path to the FAISS index file (will be created automatically)
 FAISS_INDEX_PATH = "faiss_index"
 
-# URL of the AI server's /ask endpoint
-AI_SERVER_URL = "http://localhost:8000/ask"
+# Base URL of the AI server
+AI_SERVER_URL = "http://localhost:8000"

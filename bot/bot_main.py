@@ -26,7 +26,6 @@ logger.addHandler(logging.StreamHandler())
 
 try:
     from config import TELEGRAM_BOT_TOKEN, AI_SERVER_URL
-    from ai_server.g_sheets import get_all_records, add_record
 except ImportError:
     logger.critical("Ошибка: Не найден файл config.py или ошибка импорта.")
     logger.critical("Убедитесь, что вы создали config.py в корневой папке проекта.")
@@ -84,7 +83,7 @@ async def process_question(msg: types.Message, state: FSMContext):
     await msg.answer("⏳ Ищу ответ... Пожалуйста, подождите.")
 
     try:
-        response = requests.post(AI_SERVER_URL, json={"question": data['question']})
+        response = requests.post(f"{AI_SERVER_URL}/ask", json={"question": data['question']})
         response.raise_for_status()
 
         data = response.json()
@@ -102,14 +101,24 @@ async def process_question(msg: types.Message, state: FSMContext):
 @dp.message_handler(Text(equals="📄 Просмотр данных"))
 async def view_data(msg: types.Message):
     logger.info(f"User {msg.from_user.id} requested to view data.")
-    records = get_all_records()
-    if records:
-        response = ""
-        for record in records:
-            response += f"Имя: {record['name']}, Телефон: {record['phone']}, Email: {record['email']}\\n"
-        await msg.answer(response)
-    else:
-        await msg.answer("В таблице пока нет записей.")
+    try:
+        response = requests.get(f"{AI_SERVER_URL}/records")
+        response.raise_for_status()
+        records = response.json()
+        if records:
+            response_text = ""
+            for record in records:
+                response_text += f"Имя: {record['name']}, Телефон: {record['phone']}, Email: {record['email']}\\n"
+            await msg.answer(response_text)
+        else:
+            await msg.answer("В таблице пока нет записей.")
+    except requests.exceptions.ConnectionError:
+        logger.error(f"Ошибка API: Не удалось подключиться к {AI_SERVER_URL}")
+        await msg.answer("Ошибка: AI-сервер недоступен. Свяжитесь с администратором.")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Ошибка API: {e}")
+        await msg.answer("Произошла ошибка при обработке вашего запроса. Попробуйте позже.")
+
 
 @dp.message_handler(Text(equals="✍️ Добавить запись"))
 async def add_record_start(msg: types.Message):
@@ -137,8 +146,17 @@ async def process_email(msg: types.Message, state: FSMContext):
         data['email'] = msg.text
 
     logger.info(f"User {msg.from_user.id} added a record: {data}")
-    add_record(data['name'], data['phone'], data['email'])
-    await msg.answer("Запись успешно добавлена!", reply_markup=main_menu_keyboard())
+    try:
+        response = requests.post(f"{AI_SERVER_URL}/records", json=data.as_dict())
+        response.raise_for_status()
+        await msg.answer("Запись успешно добавлена!", reply_markup=main_menu_keyboard())
+    except requests.exceptions.ConnectionError:
+        logger.error(f"Ошибка API: Не удалось подключиться к {AI_SERVER_URL}")
+        await msg.answer("Ошибка: AI-сервер недоступен. Свяжитесь с администратором.")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Ошибка API: {e}")
+        await msg.answer("Произошла ошибка при добавлении записи. Попробуйте позже.")
+
     await state.finish()
 
 @dp.message_handler(Text(equals="⚙️ Настройки"))

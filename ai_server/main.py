@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from ai_server.g_sheets import get_all_records
+from ai_server.g_sheets import get_all_records, get_user_records, add_record
 from ai_server.vector_store import build_or_load_index, search_index
 import threading
 import time
@@ -26,6 +26,11 @@ app = FastAPI(title="AI Server (Google Sheets + FAISS)")
 
 class Query(BaseModel):
     question: str
+
+class Record(BaseModel):
+    name: str
+    phone: str
+    email: str
 
 def update_index_periodically():
     """Фоновая задача для обновления индекса раз в час"""
@@ -70,6 +75,22 @@ def ask_question(query: Query):
     answer = search_index(query.question)
     logger.info(f"Ответ: {answer}")
     return {"answer": answer}
+
+@app.get("/records")
+def get_records():
+    """Endpoint to get all user records."""
+    logger.info("Received request to get all user records.")
+    records = get_user_records()
+    return records
+
+@app.post("/records")
+def create_record(record: Record):
+    """Endpoint to add a new user record."""
+    logger.info(f"Received request to add a new record: {record}")
+    success = add_record(name=record.name, phone=record.phone, email=record.email)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to add record to Google Sheet.")
+    return {"status": "success", "record": record}
 
 @app.get("/health")
 def health_check():
