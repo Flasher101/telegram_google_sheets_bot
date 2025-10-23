@@ -74,7 +74,8 @@ def get_all_records():
 
         normalized_records = []
         for r in records:
-            record_lower = {k.lower(): v for k, v in r.items()}
+            # Strip whitespace from keys and convert to lower case for robust matching
+            record_lower = {k.strip().lower(): v for k, v in r.items()}
 
             question = record_lower.get('вопрос') or record_lower.get('question')
             answer = record_lower.get('ответ') or record_lower.get('answer')
@@ -85,9 +86,10 @@ def get_all_records():
         if not normalized_records:
             print("Предупреждение: На первом листе не найдено записей с подходящими столбцами.")
             print("Ожидались столбцы 'Вопрос'/'Question' и 'Ответ'/'Answer'.")
-        else:
-            print(f"INFO: Успешно загружено {len(normalized_records)} записей из Google Sheets.")
+            print("INFO: Попытка загрузки из локального файла local_data.csv...")
+            return _read_from_csv()
 
+        print(f"INFO: Успешно загружено {len(normalized_records)} записей из Google Sheets.")
         return normalized_records
 
     except Exception as e:
