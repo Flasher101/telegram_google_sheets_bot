@@ -52,6 +52,13 @@ def main_menu_keyboard():
     keyboard = types.ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
     return keyboard
 
+def consultation_keyboard():
+    buttons = [
+        [types.KeyboardButton(text="⬅️ Вернуться в главное меню")]
+    ]
+    keyboard = types.ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+    return keyboard
+
 # --- Handlers ---
 @dp.message(Command("start"))
 async def cmd_start(msg: types.Message, state: FSMContext):
@@ -78,14 +85,14 @@ async def start_ai_consultation(msg: types.Message, state: FSMContext):
     await msg.answer(
         "Вы вошли в режим консультации с AI.\n"
         "Теперь вы можете задавать вопросы без остановки.\n\n"
-        "Чтобы выйти из этого режима и вернуться в главное меню, отправьте команду /stop.",
-        reply_markup=types.ReplyKeyboardRemove() # Убираем основную клавиатуру
+        "Чтобы выйти, нажмите кнопку ниже.",
+        reply_markup=consultation_keyboard()
     )
 
-# Новый хендлер для выхода из режима консультации
-@dp.message(Command("stop"), Form.ai_consultation)
+# Handler for the "Return to main menu" button
+@dp.message(F.text == "⬅️ Вернуться в главное меню", Form.ai_consultation)
 async def stop_consultation(msg: types.Message, state: FSMContext):
-    logger.info(f"User {msg.from_user.id} stopped AI consultation mode.")
+    logger.info(f"User {msg.from_user.id} stopped AI consultation mode via button.")
     await state.clear()
     await msg.answer(
         "Вы вышли из режима консультации.\n"
