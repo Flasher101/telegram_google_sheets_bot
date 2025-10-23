@@ -12,8 +12,9 @@ OPENAI_API_KEY = "sk-YOUR_OPENAI_API_KEY"
 # GOOGLE_SHEETS_ID is "1234567890abcdefghijklmnopqrstuvwxyz"
 GOOGLE_SHEETS_ID = "YOUR_GOOGLE_SHEETS_ID"
 
-# Path to the FAISS index file (will be created automatically)
-FAISS_INDEX_PATH = "faiss_index"
+# Path to the FAISS index file (e.g., inside a directory)
+# The directory will be created automatically.
+FAISS_INDEX_PATH = "faiss_index/index.faiss"
 
 # Base URL of the AI server
 AI_SERVER_URL = "http://localhost:8000"
