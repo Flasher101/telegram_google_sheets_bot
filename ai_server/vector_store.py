@@ -4,12 +4,14 @@ import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
 import os
+from config import FAISS_INDEX_PATH
 
 # Используем ту же модель, что и обсуждали
 MODEL_NAME = 'all-MiniLM-L6-v2'
 # Размер эмбеддинга для этой модели
-EMBEDDING_DIM = 384 
-INDEX_PATH = os.path.join(os.path.dirname(__file__), "faiss_index", "index.faiss")
+EMBEDDING_DIM = 384
+# Используем путь из конфига, чтобы избежать проблем с кириллицей и пробелами
+INDEX_PATH = FAISS_INDEX_PATH
 
 # 1. Инициализация модели (загружается 1 раз)
 print("Загрузка embedding-модели...")
