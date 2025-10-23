@@ -1,14 +1,13 @@
 # bot/bot_main.py
 
 import requests
-from aiogram import Bot, Dispatcher, types
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.dispatcher import FSMContext
-from aiogram.dispatcher.filters import Text
-from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.utils import executor
+import asyncio
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
 import sys
-import os
 import logging
 from logging.handlers import RotatingFileHandler
 
@@ -31,9 +30,10 @@ except ImportError:
     logger.critical("Убедитесь, что вы создали config.py в корневой папке проекта.")
     sys.exit(1)
 
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
+# --- Bot and Dispatcher Setup ---
 storage = MemoryStorage()
-dp = Dispatcher(bot, storage=storage)
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
+dp = Dispatcher(storage=storage)
 
 class Form(StatesGroup):
     question = State()
@@ -41,24 +41,27 @@ class Form(StatesGroup):
     phone = State()
     email = State()
 
-# --- Кнопки ---
+# --- Keyboards ---
 def main_menu_keyboard():
-    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.add("🤖 Консультация AI")
-    keyboard.add("📄 Просмотр данных", "✍️ Добавить запись")
-    keyboard.add("⚙️ Настройки")
+    buttons = [
+        [types.KeyboardButton(text="🤖 Консультация AI")],
+        [types.KeyboardButton(text="📄 Просмотр данных"), types.KeyboardButton(text="✍️ Добавить запись")],
+        [types.KeyboardButton(text="⚙️ Настройки")]
+    ]
+    keyboard = types.ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
     return keyboard
 
-# --- Обработчики ---
-@dp.message_handler(commands=["start"])
-async def cmd_start(msg: types.Message):
+# --- Handlers ---
+@dp.message(Command("start"))
+async def cmd_start(msg: types.Message, state: FSMContext):
     logger.info(f"User {msg.from_user.id} started the bot.")
+    await state.clear()
     await msg.answer(
         "Здравствуйте! Я ваш AI-ассистент. Выберите действие:",
         reply_markup=main_menu_keyboard()
     )
 
-@dp.message_handler(commands=["help"])
+@dp.message(Command("help"))
 async def cmd_help(msg: types.Message):
     logger.info(f"User {msg.from_user.id} requested help.")
     await msg.answer(
@@ -67,28 +70,30 @@ async def cmd_help(msg: types.Message):
         "/help - показать это сообщение\n"
     )
 
-@dp.message_handler(Text(equals="🤖 Консультация AI"))
-async def ask_ai(msg: types.Message):
+@dp.message(F.text == "🤖 Консультация AI")
+async def ask_ai(msg: types.Message, state: FSMContext):
     logger.info(f"User {msg.from_user.id} wants to ask a question.")
+    await state.set_state(Form.question)
     await msg.answer("Пожалуйста, задайте ваш вопрос:")
-    await Form.question.set()
 
-@dp.message_handler(state=Form.question)
+@dp.message(Form.question)
 async def process_question(msg: types.Message, state: FSMContext):
-    async with state.proxy() as data:
-        data['question'] = msg.text
-    await state.finish()
+    question_text = msg.text
+    await state.clear()
 
-    logger.info(f"User {msg.from_user.id} asked: {data['question']}")
+    logger.info(f"User {msg.from_user.id} asked: {question_text}")
     await msg.answer("⏳ Ищу ответ... Пожалуйста, подождите.")
 
     try:
-        response = requests.post(f"{AI_SERVER_URL}/ask", json={"question": data['question']})
+        response = requests.post(f"{AI_SERVER_URL}/ask", json={"question": question_text}, timeout=30)
         response.raise_for_status()
 
         data = response.json()
-        await msg.answer(data['answer'])
+        await msg.answer(data.get('answer', 'Не удалось получить ответ от сервера.'))
 
+    except requests.exceptions.Timeout:
+        logger.error(f"Ошибка API: Таймаут при запросе к {AI_SERVER_URL}")
+        await msg.answer("Сервер слишком долго не отвечает. Попробуйте еще раз позже.")
     except requests.exceptions.ConnectionError:
         logger.error(f"Ошибка API: Не удалось подключиться к {AI_SERVER_URL}")
         await msg.answer("Ошибка: AI-сервер недоступен. Свяжитесь с администратором.")
@@ -98,20 +103,23 @@ async def process_question(msg: types.Message, state: FSMContext):
 
     await msg.answer("Могу помочь чем-то еще?", reply_markup=main_menu_keyboard())
 
-@dp.message_handler(Text(equals="📄 Просмотр данных"))
+@dp.message(F.text == "📄 Просмотр данных")
 async def view_data(msg: types.Message):
     logger.info(f"User {msg.from_user.id} requested to view data.")
     try:
-        response = requests.get(f"{AI_SERVER_URL}/records")
+        response = requests.get(f"{AI_SERVER_URL}/records", timeout=15)
         response.raise_for_status()
         records = response.json()
         if records:
             response_text = ""
             for record in records:
-                response_text += f"Имя: {record['name']}, Телефон: {record['phone']}, Email: {record['email']}\\n"
+                response_text += f"Имя: {record.get('name', 'N/A')}, Телефон: {record.get('phone', 'N/A')}, Email: {record.get('email', 'N/A')}\n"
             await msg.answer(response_text)
         else:
             await msg.answer("В таблице пока нет записей.")
+    except requests.exceptions.Timeout:
+        logger.error(f"Ошибка API: Таймаут при запросе к {AI_SERVER_URL}")
+        await msg.answer("Сервер слишком долго не отвечает. Попробуйте еще раз позже.")
     except requests.exceptions.ConnectionError:
         logger.error(f"Ошибка API: Не удалось подключиться к {AI_SERVER_URL}")
         await msg.answer("Ошибка: AI-сервер недоступен. Свяжитесь с администратором.")
@@ -119,37 +127,38 @@ async def view_data(msg: types.Message):
         logger.error(f"Ошибка API: {e}")
         await msg.answer("Произошла ошибка при обработке вашего запроса. Попробуйте позже.")
 
-
-@dp.message_handler(Text(equals="✍️ Добавить запись"))
-async def add_record_start(msg: types.Message):
+@dp.message(F.text == "✍️ Добавить запись")
+async def add_record_start(msg: types.Message, state: FSMContext):
     logger.info(f"User {msg.from_user.id} wants to add a record.")
-    await Form.name.set()
+    await state.set_state(Form.name)
     await msg.answer("Введите имя:")
 
-@dp.message_handler(state=Form.name)
+@dp.message(Form.name)
 async def process_name(msg: types.Message, state: FSMContext):
-    async with state.proxy() as data:
-        data['name'] = msg.text
-    await Form.next()
+    await state.update_data(name=msg.text)
+    await state.set_state(Form.phone)
     await msg.answer("Введите телефон:")
 
-@dp.message_handler(state=Form.phone)
+@dp.message(Form.phone)
 async def process_phone(msg: types.Message, state: FSMContext):
-    async with state.proxy() as data:
-        data['phone'] = msg.text
-    await Form.next()
+    await state.update_data(phone=msg.text)
+    await state.set_state(Form.email)
     await msg.answer("Введите email:")
 
-@dp.message_handler(state=Form.email)
+@dp.message(Form.email)
 async def process_email(msg: types.Message, state: FSMContext):
-    async with state.proxy() as data:
-        data['email'] = msg.text
+    await state.update_data(email=msg.text)
+    user_data = await state.get_data()
+    await state.clear()
 
-    logger.info(f"User {msg.from_user.id} added a record: {data}")
+    logger.info(f"User {msg.from_user.id} added a record: {user_data}")
     try:
-        response = requests.post(f"{AI_SERVER_URL}/records", json=data.as_dict())
+        response = requests.post(f"{AI_SERVER_URL}/records", json=user_data, timeout=15)
         response.raise_for_status()
         await msg.answer("Запись успешно добавлена!", reply_markup=main_menu_keyboard())
+    except requests.exceptions.Timeout:
+        logger.error(f"Ошибка API: Таймаут при запросе к {AI_SERVER_URL}")
+        await msg.answer("Сервер слишком долго не отвечает. Попробуйте еще раз позже.")
     except requests.exceptions.ConnectionError:
         logger.error(f"Ошибка API: Не удалось подключиться к {AI_SERVER_URL}")
         await msg.answer("Ошибка: AI-сервер недоступен. Свяжитесь с администратором.")
@@ -157,13 +166,19 @@ async def process_email(msg: types.Message, state: FSMContext):
         logger.error(f"Ошибка API: {e}")
         await msg.answer("Произошла ошибка при добавлении записи. Попробуйте позже.")
 
-    await state.finish()
-
-@dp.message_handler(Text(equals="⚙️ Настройки"))
+@dp.message(F.text == "⚙️ Настройки")
 async def settings(msg: types.Message):
     logger.info(f"User {msg.from_user.id} accessed settings.")
     await msg.answer("Раздел настроек находится в разработке.")
 
-if __name__ == "__main__":
+async def main():
     logger.info("Бот запускается...")
-    executor.start_polling(dp, skip_updates=True)
+    # This will skip updates which were sent when the bot was offline
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Бот остановлен.")

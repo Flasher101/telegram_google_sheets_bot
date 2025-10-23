@@ -1,11 +1,19 @@
 # config.py
 
-# Токен, который вы получили от @BotFather
-TELEGRAM_TOKEN = "8337978732:AAErMoUhp13RtoItK13N3wvJJNa0fhsFL74" 
+# Telegram Bot Token from @BotFather
+TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
 
-# Точное название вашей Google Таблицы (как на вкладке)
-GOOGLE_SHEET_NAME = "AI_bot_bz" 
+# OpenAI API Key for future AI model integrations
+# Get your key from: https://platform.openai.com/account/api-keys
+OPENAI_API_KEY = "sk-YOUR_OPENAI_API_KEY"
 
-# URL нашего FastAPI сервера. 
-# Если запускаете все на одной машине, 127.0.0.1 (localhost) подойдет.
-AI_API_URL = "http://127.0.0.1:8000/ask"
+# Google Sheets ID from the URL of your Google Sheet
+# Example: https://docs.google.com/spreadsheets/d/1234567890abcdefghijklmnopqrstuvwxyz/edit#gid=0
+# GOOGLE_SHEETS_ID is "1234567890abcdefghijklmnopqrstuvwxyz"
+GOOGLE_SHEETS_ID = "YOUR_GOOGLE_SHEETS_ID"
+
+# Path to the FAISS index file (will be created automatically)
+FAISS_INDEX_PATH = "faiss_index"
+
+# Base URL of the AI server
+AI_SERVER_URL = "http://localhost:8000"

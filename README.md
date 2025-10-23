@@ -80,6 +80,10 @@ The project is composed of two main components:
 -   **AI Server:** A FastAPI application that provides an API for querying the FAISS vector search index.
 -   **Bot:** A Telegram bot built with aiogram that interacts with the user and communicates with the AI server.
 
+## OpenAI API Key
+
+The `OPENAI_API_KEY` in the configuration is included for future enhancements, such as integrating more advanced AI models for question answering. Currently, the AI server uses a sentence transformer model for vector embeddings, which does not require this key.
+
 The bot and the AI server communicate with each other via HTTP requests. The bot sends a request to the AI server when a user asks a question, and the AI server responds with the answer.
 
 ## Troubleshooting
