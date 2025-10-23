@@ -3,6 +3,10 @@
 # Telegram Bot Token from @BotFather
 TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
 
+# OpenAI API Key for future AI model integrations
+# Get your key from: https://platform.openai.com/account/api-keys
+OPENAI_API_KEY = "sk-YOUR_OPENAI_API_KEY"
+
 # Google Sheets ID from the URL of your Google Sheet
 # Example: https://docs.google.com/spreadsheets/d/1234567890abcdefghijklmnopqrstuvwxyz/edit#gid=0
 # GOOGLE_SHEETS_ID is "1234567890abcdefghijklmnopqrstuvwxyz"
