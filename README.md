@@ -65,6 +65,25 @@ This project provides a Telegram bot that can answer questions using a FAISS vec
     ./start.sh
     ```
 
+## Running the Dashboard
+
+1.  **Install the dependencies:**
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+2.  **Run the dashboard:**
+    ```bash
+    python run_dashboard.py
+    ```
+    Or directly with Streamlit:
+    ```bash
+    streamlit run dashboard/app.py
+    ```
+
+3.  **Open in your browser:**
+    Navigate to `http://localhost:8501` in your web browser.
+
 ## Testing the Bot
 
 1.  Open the Telegram app.
