@@ -36,7 +36,8 @@ bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher(storage=storage)
 
 class Form(StatesGroup):
-    question = State()
+    ai_consultation = State() # Новый стейт для режима консультации
+    question = State() # Этот стейт больше не будет использоваться для AI, но оставим для обратной совместимости или других целей
     name = State()
     phone = State()
     email = State()
@@ -71,18 +72,35 @@ async def cmd_help(msg: types.Message):
     )
 
 @dp.message(F.text == "🤖 Консультация AI")
-async def ask_ai(msg: types.Message, state: FSMContext):
-    logger.info(f"User {msg.from_user.id} wants to ask a question.")
-    await state.set_state(Form.question)
-    await msg.answer("Пожалуйста, задайте ваш вопрос:")
+async def start_ai_consultation(msg: types.Message, state: FSMContext):
+    logger.info(f"User {msg.from_user.id} started AI consultation mode.")
+    await state.set_state(Form.ai_consultation)
+    await msg.answer(
+        "Вы вошли в режим консультации с AI.\n"
+        "Теперь вы можете задавать вопросы без остановки.\n\n"
+        "Чтобы выйти из этого режима и вернуться в главное меню, отправьте команду /stop.",
+        reply_markup=types.ReplyKeyboardRemove() # Убираем основную клавиатуру
+    )
 
-@dp.message(Form.question)
-async def process_question(msg: types.Message, state: FSMContext):
-    question_text = msg.text
+# Новый хендлер для выхода из режима консультации
+@dp.message(Command("stop"), Form.ai_consultation)
+async def stop_consultation(msg: types.Message, state: FSMContext):
+    logger.info(f"User {msg.from_user.id} stopped AI consultation mode.")
     await state.clear()
+    await msg.answer(
+        "Вы вышли из режима консультации.\n"
+        "Чем могу помочь?",
+        reply_markup=main_menu_keyboard()
+    )
 
-    logger.info(f"User {msg.from_user.id} asked: {question_text}")
-    await msg.answer("⏳ Ищу ответ... Пожалуйста, подождите.")
+# Этот хендлер теперь будет ловить любые сообщения, пока пользователь в режиме консультации
+@dp.message(Form.ai_consultation, F.text)
+async def process_ai_question(msg: types.Message, state: FSMContext):
+    question_text = msg.text
+    logger.info(f"User {msg.from_user.id} (in consultation mode) asked: {question_text}")
+
+    # Показываем индикатор "печатает..."
+    await bot.send_chat_action(msg.chat.id, 'typing')
 
     try:
         response = requests.post(f"{AI_SERVER_URL}/ask", json={"question": question_text}, timeout=30)
@@ -101,7 +119,14 @@ async def process_question(msg: types.Message, state: FSMContext):
         logger.error(f"Ошибка API: {e}")
         await msg.answer("Произошла ошибка при обработке вашего запроса. Попробуйте позже.")
 
-    await msg.answer("Могу помочь чем-то еще?", reply_markup=main_menu_keyboard())
+    # Стейт не сбрасываем, пользователь может продолжать задавать вопросы
+
+
+# Старый обработчик вопроса (больше не используется, можно удалить)
+# @dp.message(Form.question)
+# async def process_question(msg: types.Message, state: FSMContext):
+# ... (код старого обработчика)
+
 
 @dp.message(F.text == "📄 Просмотр данных")
 async def view_data(msg: types.Message):
