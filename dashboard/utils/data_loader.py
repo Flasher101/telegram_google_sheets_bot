@@ -60,3 +60,31 @@ def get_stats(df, date_from, date_to):
     }
 
     return stats
+
+def load_feedback_data():
+    """Загрузить данные об отзывах из Google Sheets (третий лист)"""
+    try:
+        creds = Credentials.from_service_account_file(
+            get_credentials_path(),
+            scopes=SCOPES
+        )
+        client = gspread.authorize(creds)
+
+        from config import GOOGLE_SHEETS_ID
+        spreadsheet = client.open_by_key(GOOGLE_SHEETS_ID)
+        sheet = spreadsheet.get_worksheet(2) # Third worksheet
+
+        if not sheet:
+            return pd.DataFrame() # Return empty if sheet doesn't exist
+
+        data = sheet.get_all_records()
+        df = pd.DataFrame(data)
+
+        if 'timestamp' in df.columns:
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+
+        return df
+
+    except Exception as e:
+        print(f"Warning: Could not load feedback data. {e}")
+        return pd.DataFrame() # Return empty on error

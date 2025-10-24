@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from ai_server.g_sheets import get_all_records, get_user_records, add_record, log_question
+from ai_server.g_sheets import get_all_records, get_user_records, add_record, log_question, log_feedback
 from ai_server.vector_store import build_or_load_index, search_index
 import threading
 import time
@@ -32,6 +32,10 @@ class Record(BaseModel):
     name: str
     phone: str
     email: str
+
+class Feedback(BaseModel):
+    user_id: str
+    feedback: str # "good" or "bad"
 
 def update_index_periodically():
     """Фоновая задача для обновления индекса раз в час"""
@@ -106,6 +110,17 @@ def create_record(record: Record):
     if not success:
         raise HTTPException(status_code=500, detail="Failed to add record to Google Sheet.")
     return {"status": "success", "record": record}
+
+@app.post("/feedback")
+def receive_feedback(feedback: Feedback):
+    """Endpoint to receive and log user feedback."""
+    logger.info(f"Received feedback from user_id={feedback.user_id}: {feedback.feedback}")
+    try:
+        log_feedback(user_id=feedback.user_id, feedback=feedback.feedback)
+        return {"status": "success"}
+    except Exception as e:
+        logger.error(f"Failed to log feedback: {e}")
+        raise HTTPException(status_code=500, detail="Failed to log feedback.")
 
 @app.get("/health")
 def health_check():
