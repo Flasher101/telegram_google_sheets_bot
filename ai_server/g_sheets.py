@@ -4,191 +4,160 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import os
 import csv
-from config import GOOGLE_SHEETS_ID # Use ID instead of Name for reliability
+from config import GOOGLE_SHEETS_ID
+from gspread.exceptions import WorksheetNotFound
+from datetime import datetime
 
-# Path to the key file, assuming it's in the project root
+# --- Constants ---
 KEY_FILE_PATH = 'service_account.json'
 SCOPE = ["https://spreadsheets.google.com/feeds", 'https://www.googleapis.com/auth/drive']
-LOCAL_DATA_PATH = 'local_data.csv' # Path to the local CSV fallback
+LOCAL_DATA_PATH = 'local_data.csv'
 
-def _get_sheet(worksheet_index=0):
-    """Helper function to authorize and get a specific worksheet."""
+# Define worksheet titles for clarity and robustness
+KB_SHEET_INDEX = 0  # Knowledge base remains the first sheet
+USER_RECORDS_SHEET_TITLE = "User Records"
+INTERACTION_LOGS_SHEET_TITLE = "Interaction Logs"
+FEEDBACK_SHEET_TITLE = "User Feedback"
+
+# --- Helper Functions ---
+
+def _get_client():
+    """Helper to authorize and get the gspread client."""
     creds = ServiceAccountCredentials.from_json_keyfile_name(KEY_FILE_PATH, SCOPE)
-    client = gspread.authorize(creds)
-    workbook = client.open_by_key(GOOGLE_SHEETS_ID)
-    return workbook.get_worksheet(worksheet_index)
+    return gspread.authorize(creds)
+
+def _get_or_create_sheet_by_title(workbook, title, headers=None):
+    """Gets a worksheet by title, creating it with headers if it doesn't exist."""
+    try:
+        return workbook.worksheet(title)
+    except WorksheetNotFound:
+        print(f"INFO: Worksheet '{title}' not found. Creating it.")
+        sheet = workbook.add_worksheet(title=title, rows="100", cols="20")
+        if headers:
+            sheet.append_row(headers, value_input_option='USER_ENTERED')
+            print(f"INFO: Added headers to '{title}': {headers}")
+        return sheet
 
 def _read_from_csv():
     """Reads records from local_data.csv."""
-    print(f"INFO: Попытка чтения данных из локального файла '{LOCAL_DATA_PATH}'...")
+    print(f"INFO: Attempting to read data from local file '{LOCAL_DATA_PATH}'...")
     if not os.path.exists(LOCAL_DATA_PATH):
-        print(f"Предупреждение: Файл '{LOCAL_DATA_PATH}' не найден. Локальная база знаний недоступна.")
+        print(f"WARNING: File '{LOCAL_DATA_PATH}' not found. Local knowledge base is unavailable.")
         return []
 
     try:
-        with open(LOCAL_DATA_PATH, mode='r', encoding='utf-8') as infile:
-            # Handle potential BOM (Byte Order Mark) for UTF-8 files from Excel
-            infile.seek(0)
-            if infile.read(1) != '\ufeff':
-                infile.seek(0)
-
+        with open(LOCAL_DATA_PATH, mode='r', encoding='utf-8-sig') as infile:
             reader = csv.DictReader(infile)
             normalized_records = []
             for row in reader:
-                # Normalize keys to lower case for consistent matching
                 row_lower = {k.lower(): v for k, v in row.items()}
-
                 question = row_lower.get('вопрос') or row_lower.get('question')
                 answer = row_lower.get('ответ') or row_lower.get('answer')
-
                 if question and answer:
                     normalized_records.append({'Вопрос': question, 'Ответ': answer})
 
             if normalized_records:
-                print(f"INFO: Успешно загружено {len(normalized_records)} записей из '{LOCAL_DATA_PATH}'.")
+                print(f"INFO: Successfully loaded {len(normalized_records)} records from '{LOCAL_DATA_PATH}'.")
             else:
-                print(f"Предупреждение: В файле '{LOCAL_DATA_PATH}' не найдено записей с нужными столбцами ('Вопрос'/'Question', 'Ответ'/'Answer').")
-
+                print(f"WARNING: No records with required columns ('Вопрос'/'Question', 'Ответ'/'Answer') found in '{LOCAL_DATA_PATH}'.")
             return normalized_records
     except Exception as e:
-        print(f"Ошибка при чтении файла '{LOCAL_DATA_PATH}': {e}")
+        print(f"ERROR reading file '{LOCAL_DATA_PATH}': {e}")
         return []
+
+# --- Main Data Functions ---
 
 def get_all_records():
     """
     Reads all records from the FIRST worksheet for the AI knowledge base.
-    If it fails, it falls back to reading from 'local_data.csv'.
-    It expects columns 'Вопрос'/'Question' and 'Ответ'/'Answer' (case-insensitive).
+    Falls back to 'local_data.csv' on failure.
     """
     try:
-        print("INFO: Попытка чтения данных из Google Sheets...")
-        sheet = _get_sheet(0)
+        print("INFO: Attempting to read knowledge base from Google Sheets...")
+        client = _get_client()
+        workbook = client.open_by_key(GOOGLE_SHEETS_ID)
+        sheet = workbook.get_worksheet(KB_SHEET_INDEX)
         if not sheet:
-            print("Ошибка: Первый лист (worksheet) не найден в Google Sheet.")
-            raise ConnectionError("Worksheet not found") # Raise error to trigger fallback
+            raise ConnectionError("First worksheet (knowledge base) not found.")
 
         headers = sheet.row_values(1)
-        print(f"INFO: Найдены заголовки в Google Sheet: {headers}")
+        print(f"INFO: Found headers in Google Sheet knowledge base: {headers}")
 
         records = sheet.get_all_records()
 
         normalized_records = []
         for r in records:
-            # Strip whitespace from keys and convert to lower case for robust matching
             record_lower = {k.strip().lower(): v for k, v in r.items()}
-
             question = record_lower.get('вопрос') or record_lower.get('question')
             answer = record_lower.get('ответ') or record_lower.get('answer')
-
             if question and answer:
                 normalized_records.append({'Вопрос': question, 'Ответ': answer})
 
         if not normalized_records:
-            print("Предупреждение: На первом листе не найдено записей с подходящими столбцами.")
-            print("Ожидались столбцы 'Вопрос'/'Question' и 'Ответ'/'Answer'.")
-            print("INFO: Попытка загрузки из локального файла local_data.csv...")
+            print("WARNING: No valid records found on the first worksheet. Attempting local fallback.")
             return _read_from_csv()
 
-        print(f"INFO: Успешно загружено {len(normalized_records)} записей из Google Sheets.")
+        print(f"INFO: Successfully loaded {len(normalized_records)} records from Google Sheets knowledge base.")
         return normalized_records
 
     except Exception as e:
-        print(f"КРИТИЧЕСКАЯ ОШИБКА при чтении Google Sheets: {e}")
-        print("INFO: Переключаюсь на локальную базу знаний (local_data.csv).")
+        print(f"CRITICAL ERROR reading Google Sheets knowledge base: {e}")
+        print("INFO: Switching to local knowledge base (local_data.csv).")
         return _read_from_csv()
 
 def get_user_records():
-    """
-    Reads user data from the SECOND worksheet.
-    It expects columns 'name', 'phone', 'email' (case-insensitive).
-    """
+    """Reads user data from the 'User Records' worksheet."""
     try:
-        sheet = _get_sheet(1)
-        if not sheet:
-            print("Предупреждение: Второй лист для данных пользователей не найден.")
-            return []
+        client = _get_client()
+        workbook = client.open_by_key(GOOGLE_SHEETS_ID)
+        sheet = _get_or_create_sheet_by_title(workbook, USER_RECORDS_SHEET_TITLE, headers=['name', 'phone', 'email'])
 
         records = sheet.get_all_records()
-
-        normalized_records = []
-        for r in records:
-            record_lower = {k.lower(): v for k, v in r.items()}
-            if 'name' in record_lower and 'phone' in record_lower and 'email' in record_lower:
-                normalized_records.append({
-                    'name': record_lower['name'],
-                    'phone': record_lower['phone'],
-                    'email': record_lower['email']
-                })
-        return normalized_records
+        return [r for r in records if 'name' in r and 'phone' in r and 'email' in r]
     except Exception as e:
-        print(f"Ошибка при чтении записей пользователей: {e}")
+        print(f"ERROR reading user records: {e}")
         return []
 
-def log_question(user_id: str, question: str, answer: str, response_time: float):
-    """
-    Logs a question and its analytics data to the FIRST worksheet.
-    """
+def add_record(name: str, phone: str, email: str):
+    """Adds a new record to the 'User Records' worksheet."""
     try:
-        sheet = _get_sheet(0)
-        if not sheet:
-            print("Ошибка: Первый лист для логов не найден. Не могу записать данные аналитики.")
-            return
+        client = _get_client()
+        workbook = client.open_by_key(GOOGLE_SHEETS_ID)
+        sheet = _get_or_create_sheet_by_title(workbook, USER_RECORDS_SHEET_TITLE, headers=['name', 'phone', 'email'])
 
-        # Prepare the row with a timestamp and status
-        from datetime import datetime
+        sheet.append_row([name, phone, email], value_input_option='USER_ENTERED')
+        print(f"Record added: {name}, {phone}, {email}")
+        return True
+    except Exception as e:
+        print(f"ERROR adding record to Google Sheets: {e}")
+        return False
+
+def log_question(user_id: str, question: str, answer: str, response_time: float):
+    """Logs question analytics to the 'Interaction Logs' worksheet."""
+    try:
+        client = _get_client()
+        workbook = client.open_by_key(GOOGLE_SHEETS_ID)
+        headers = ['timestamp', 'user_id', 'question', 'answer', 'response_time', 'status']
+        sheet = _get_or_create_sheet_by_title(workbook, INTERACTION_LOGS_SHEET_TITLE, headers=headers)
+
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         status = 'success' if answer else 'fail'
 
-        # This assumes your sheet has the columns in this order.
-        # It's important to match the order in your Google Sheet.
-        sheet.append_row([
-            timestamp,
-            user_id,
-            question,
-            answer,
-            response_time,
-            status
-        ], value_input_option='USER_ENTERED')
-        print(f"Вопрос залогирован: user_id={user_id}, time={response_time:.2f}s")
-
+        sheet.append_row([timestamp, user_id, question, answer, response_time, status], value_input_option='USER_ENTERED')
+        print(f"Question logged: user_id={user_id}, time={response_time:.2f}s")
     except Exception as e:
-        print(f"Ошибка при логировании вопроса в Google Sheets: {e}")
-
+        print(f"ERROR logging question to Google Sheets: {e}")
 
 def log_feedback(user_id: str, feedback: str):
-    """
-    Logs user feedback to the THIRD worksheet.
-    """
+    """Logs user feedback to the 'User Feedback' worksheet."""
     try:
-        sheet = _get_sheet(2) # Use the third sheet for feedback
-        if not sheet:
-            print("Ошибка: Третий лист для отзывов не найден. Не могу записать отзыв.")
-            return
+        client = _get_client()
+        workbook = client.open_by_key(GOOGLE_SHEETS_ID)
+        headers = ['timestamp', 'user_id', 'feedback']
+        sheet = _get_or_create_sheet_by_title(workbook, FEEDBACK_SHEET_TITLE, headers=headers)
 
-        from datetime import datetime
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-        # Assumes columns are: timestamp, user_id, feedback
         sheet.append_row([timestamp, user_id, feedback], value_input_option='USER_ENTERED')
-        print(f"Отзыв залогирован: user_id={user_id}, feedback={feedback}")
-
+        print(f"Feedback logged: user_id={user_id}, feedback={feedback}")
     except Exception as e:
-        print(f"Ошибка при логировании отзыва в Google Sheets: {e}")
-
-
-def add_record(name: str, phone: str, email: str):
-    """
-    Adds a new record to the SECOND worksheet.
-    """
-    try:
-        sheet = _get_sheet(1)
-        if not sheet:
-            print("Ошибка: Второй лист для данных пользователей не найден. Не могу добавить запись.")
-            return False
-
-        sheet.append_row([name, phone, email], value_input_option='USER_ENTERED')
-        print(f"Запись добавлена: {name}, {phone}, {email}")
-        return True
-    except Exception as e:
-        print(f"Ошибка при добавлении записи в Google Sheets: {e}")
-        return False
+        print(f"ERROR logging feedback to Google Sheets: {e}")
