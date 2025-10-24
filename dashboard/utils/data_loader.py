@@ -3,79 +3,97 @@ from google.oauth2.service_account import Credentials
 import pandas as pd
 from datetime import datetime
 import os
+from gspread.exceptions import WorksheetNotFound
 
+# --- Constants ---
 SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
     'https://www.googleapis.com/auth/drive'
 ]
+# Define worksheet titles to ensure we're reading from the right place
+INTERACTION_LOGS_SHEET_TITLE = "Interaction Logs"
+FEEDBACK_SHEET_TITLE = "User Feedback"
+
+# --- Helper Functions ---
 
 def get_credentials_path():
-    """Получить путь к credentials.json"""
-    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    return os.path.join(root_dir, 'service_account.json') # Corrected to service_account.json
+    """Gets the absolute path to the service_account.json file."""
+    # Assumes this script is in dashboard/utils, so we go up three levels to the root
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(root_dir, 'service_account.json')
+
+def _get_client():
+    """Helper to authenticate and get the gspread client."""
+    creds = Credentials.from_service_account_file(get_credentials_path(), scopes=SCOPES)
+    return gspread.authorize(creds)
+
+# --- Main Data Loading Functions ---
 
 def load_sheets_data():
-    """Загрузить данные из Google Sheets"""
+    """
+    Loads user interaction data from the 'Interaction Logs' worksheet in Google Sheets.
+    """
     try:
-        creds = Credentials.from_service_account_file(
-            get_credentials_path(),
-            scopes=SCOPES
-        )
-        client = gspread.authorize(creds)
-
+        client = _get_client()
         from config import GOOGLE_SHEETS_ID
-        # Open the sheet by its unique ID for reliability
         spreadsheet = client.open_by_key(GOOGLE_SHEETS_ID)
-        sheet = spreadsheet.sheet1
 
-        # Получить все данные
+        try:
+            sheet = spreadsheet.worksheet(INTERACTION_LOGS_SHEET_TITLE)
+        except WorksheetNotFound:
+            # If the sheet doesn't exist, the bot/server hasn't created it yet.
+            # Return an empty DataFrame with the expected columns to prevent errors.
+            print(f"WARNING: Worksheet '{INTERACTION_LOGS_SHEET_TITLE}' not found. Returning empty DataFrame.")
+            return pd.DataFrame(columns=['timestamp', 'user_id', 'question', 'answer', 'response_time', 'status'])
+
         data = sheet.get_all_records()
         df = pd.DataFrame(data)
 
-        # Преобразование временных меток
+        # Ensure timestamp column is correctly typed
         if 'timestamp' in df.columns:
             df['timestamp'] = pd.to_datetime(df['timestamp'])
 
         return df
 
     except Exception as e:
-        raise Exception(f"Ошибка загрузки данных: {e}")
+        print(f"ERROR loading interaction data from Google Sheets: {e}")
+        # Return an empty DataFrame on other errors to allow the dashboard to run
+        return pd.DataFrame(columns=['timestamp', 'user_id', 'question', 'answer', 'response_time', 'status'])
 
 def get_stats(df, date_from, date_to):
-    """Рассчитать статистику"""
-    # Фильтрация по датам
-    if 'timestamp' in df.columns:
-        df_filtered = df[
-            (df['timestamp'].dt.date >= date_from) &
-            (df['timestamp'].dt.date <= date_to)
-        ]
-    else:
-        df_filtered = df
+    """Calculates statistics for the dashboard metrics."""
+    if df.empty:
+        return {'total_questions': 0, 'successful_answers': 0, 'avg_response_time': 0, 'active_users': 0}
+
+    # Filter by the selected date range
+    df_filtered = df[
+        (df['timestamp'].dt.date >= date_from) &
+        (df['timestamp'].dt.date <= date_to)
+    ]
 
     stats = {
         'total_questions': len(df_filtered),
-        'successful_answers': len(df_filtered[df_filtered['status'] == 'success']) if 'status' in df_filtered.columns else len(df_filtered),
-        'avg_response_time': df_filtered['response_time'].mean() if 'response_time' in df_filtered.columns else 0,
+        'successful_answers': len(df_filtered[df_filtered['status'] == 'success']) if 'status' in df_filtered.columns else 0,
+        'avg_response_time': df_filtered['response_time'].astype(float).mean() if 'response_time' in df_filtered.columns and not df_filtered.empty else 0,
         'active_users': df_filtered['user_id'].nunique() if 'user_id' in df_filtered.columns else 0,
     }
 
     return stats
 
 def load_feedback_data():
-    """Загрузить данные об отзывах из Google Sheets (третий лист)"""
+    """
+    Loads user feedback from the 'User Feedback' worksheet.
+    """
     try:
-        creds = Credentials.from_service_account_file(
-            get_credentials_path(),
-            scopes=SCOPES
-        )
-        client = gspread.authorize(creds)
-
+        client = _get_client()
         from config import GOOGLE_SHEETS_ID
         spreadsheet = client.open_by_key(GOOGLE_SHEETS_ID)
-        sheet = spreadsheet.get_worksheet(2) # Third worksheet
 
-        if not sheet:
-            return pd.DataFrame() # Return empty if sheet doesn't exist
+        try:
+            sheet = spreadsheet.worksheet(FEEDBACK_SHEET_TITLE)
+        except WorksheetNotFound:
+            print(f"WARNING: Worksheet '{FEEDBACK_SHEET_TITLE}' not found. Returning empty DataFrame.")
+            return pd.DataFrame()
 
         data = sheet.get_all_records()
         df = pd.DataFrame(data)
@@ -86,5 +104,5 @@ def load_feedback_data():
         return df
 
     except Exception as e:
-        print(f"Warning: Could not load feedback data. {e}")
+        print(f"WARNING: Could not load feedback data. {e}")
         return pd.DataFrame() # Return empty on error
