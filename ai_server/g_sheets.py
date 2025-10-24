@@ -155,6 +155,27 @@ def log_question(user_id: str, question: str, answer: str, response_time: float)
         print(f"Ошибка при логировании вопроса в Google Sheets: {e}")
 
 
+def log_feedback(user_id: str, feedback: str):
+    """
+    Logs user feedback to the THIRD worksheet.
+    """
+    try:
+        sheet = _get_sheet(2) # Use the third sheet for feedback
+        if not sheet:
+            print("Ошибка: Третий лист для отзывов не найден. Не могу записать отзыв.")
+            return
+
+        from datetime import datetime
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        # Assumes columns are: timestamp, user_id, feedback
+        sheet.append_row([timestamp, user_id, feedback], value_input_option='USER_ENTERED')
+        print(f"Отзыв залогирован: user_id={user_id}, feedback={feedback}")
+
+    except Exception as e:
+        print(f"Ошибка при логировании отзыва в Google Sheets: {e}")
+
+
 def add_record(name: str, phone: str, email: str):
     """
     Adds a new record to the SECOND worksheet.

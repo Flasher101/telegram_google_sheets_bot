@@ -7,9 +7,10 @@ import os
 # Добавляем корневую директорию проекта в путь
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from dashboard.utils.data_loader import load_sheets_data, get_stats
+from dashboard.utils.data_loader import load_sheets_data, get_stats, load_feedback_data
 from dashboard.utils.charts import create_activity_chart, create_response_time_chart
 from config import GOOGLE_SHEETS_ID # Import GOOGLE_SHEETS_ID
+import plotly.express as px
 
 # Настройка страницы
 st.set_page_config(
@@ -160,3 +161,30 @@ if auto_refresh:
     import time
     time.sleep(refresh_interval)
     st.rerun()
+
+st.markdown("---")
+
+# --- Feedback Analytics ---
+st.subheader("👍👎 Оценка пользователей")
+feedback_data = load_feedback_data()
+
+if not feedback_data.empty:
+    feedback_counts = feedback_data['feedback'].value_counts().reset_index()
+    feedback_counts.columns = ['feedback', 'count']
+
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        st.metric("Всего оценок", feedback_counts['count'].sum())
+        st.dataframe(feedback_counts)
+
+    with col2:
+        fig = px.pie(
+            feedback_counts,
+            values='count',
+            names='feedback',
+            title='Распределение оценок',
+            color_discrete_map={'good': 'green', 'bad': 'red'}
+        )
+        st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info("Пока нет данных об оценках.")

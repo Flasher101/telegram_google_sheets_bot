@@ -10,6 +10,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 import sys
 import logging
 from logging.handlers import RotatingFileHandler
+import asyncio
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # --- Logging Setup ---
 log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -35,6 +37,9 @@ storage = MemoryStorage()
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher(storage=storage)
 
+# Dictionary to keep track of feedback timers for each user
+feedback_timers = {}
+
 class Form(StatesGroup):
     ai_consultation = State() # Новый стейт для режима консультации
     question = State() # Этот стейт больше не будет использоваться для AI, но оставим для обратной совместимости или других целей
@@ -59,6 +64,29 @@ def consultation_keyboard():
     keyboard = types.ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
     return keyboard
 
+def feedback_keyboard():
+    buttons = [
+        [
+            InlineKeyboardButton(text="👍 Помогло", callback_data="feedback_good"),
+            InlineKeyboardButton(text="👎 Не помогло", callback_data="feedback_bad")
+        ]
+    ]
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    return keyboard
+
+async def schedule_feedback(chat_id: int):
+    """Schedules a feedback message to be sent after a delay."""
+    await asyncio.sleep(600)  # 10 minutes
+    if chat_id in feedback_timers:
+        logger.info(f"Sending feedback request to chat_id={chat_id}")
+        await bot.send_message(
+            chat_id,
+            "Пожалуйста, оцените последний ответ AI:",
+            reply_markup=feedback_keyboard()
+        )
+        # Remove the timer once the message is sent
+        del feedback_timers[chat_id]
+
 # --- Handlers ---
 @dp.message(Command("start"))
 async def cmd_start(msg: types.Message, state: FSMContext):
@@ -80,7 +108,15 @@ async def cmd_help(msg: types.Message):
 
 @dp.message(F.text == "🤖 Консультация AI")
 async def start_ai_consultation(msg: types.Message, state: FSMContext):
-    logger.info(f"User {msg.from_user.id} started AI consultation mode.")
+    user_id = msg.from_user.id
+    logger.info(f"User {user_id} started AI consultation mode.")
+
+    # Cancel any existing feedback timer for this user
+    if user_id in feedback_timers:
+        feedback_timers[user_id].cancel()
+        del feedback_timers[user_id]
+        logger.info(f"Cancelled pending feedback request for user_id={user_id}")
+
     await state.set_state(Form.ai_consultation)
     await msg.answer(
         "Вы вошли в режим консультации с AI.\n"
@@ -92,8 +128,15 @@ async def start_ai_consultation(msg: types.Message, state: FSMContext):
 # Handler for the "Return to main menu" button
 @dp.message(F.text == "⬅️ Вернуться в главное меню", Form.ai_consultation)
 async def stop_consultation(msg: types.Message, state: FSMContext):
-    logger.info(f"User {msg.from_user.id} stopped AI consultation mode via button.")
+    user_id = msg.from_user.id
+    logger.info(f"User {user_id} stopped AI consultation mode via button.")
     await state.clear()
+
+    # Schedule the feedback message
+    task = asyncio.create_task(schedule_feedback(user_id))
+    feedback_timers[user_id] = task
+    logger.info(f"Scheduled feedback request for user_id={user_id}")
+
     await msg.answer(
         "Вы вышли из режима консультации.\n"
         "Чем могу помочь?",
@@ -138,6 +181,26 @@ async def process_ai_question(msg: types.Message, state: FSMContext):
 # @dp.message(Form.question)
 # async def process_question(msg: types.Message, state: FSMContext):
 # ... (код старого обработчика)
+
+
+@dp.callback_query(F.data.startswith("feedback_"))
+async def process_feedback(callback_query: types.CallbackQuery):
+    feedback_type = callback_query.data.split("_")[1]
+    user_id = callback_query.from_user.id
+    logger.info(f"Received feedback '{feedback_type}' from user_id={user_id}")
+
+    # Send feedback to the AI server
+    try:
+        payload = {"user_id": str(user_id), "feedback": feedback_type}
+        response = requests.post(f"{AI_SERVER_URL}/feedback", json=payload, timeout=15)
+        response.raise_for_status()
+        logger.info(f"Feedback successfully sent to AI server for user_id={user_id}")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to send feedback to AI server for user_id={user_id}: {e}")
+
+    # Thank the user and remove the inline keyboard
+    await callback_query.message.edit_text("Спасибо за ваш отзыв!")
+    await callback_query.answer()
 
 
 @dp.message(F.text == "📄 Просмотр данных")
