@@ -110,7 +110,12 @@ async def process_ai_question(msg: types.Message, state: FSMContext):
     await bot.send_chat_action(msg.chat.id, 'typing')
 
     try:
-        response = requests.post(f"{AI_SERVER_URL}/ask", json={"question": question_text}, timeout=30)
+        # Теперь отправляем и user_id для аналитики
+        payload = {
+            "question": question_text,
+            "user_id": str(msg.from_user.id) # Убедимся, что ID это строка
+        }
+        response = requests.post(f"{AI_SERVER_URL}/ask", json=payload, timeout=30)
         response.raise_for_status()
 
         data = response.json()
