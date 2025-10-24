@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from ai_server.g_sheets import get_all_records, get_user_records, add_record
+from ai_server.g_sheets import get_all_records, get_user_records, add_record, log_question
 from ai_server.vector_store import build_or_load_index, search_index
 import threading
 import time
@@ -26,6 +26,7 @@ app = FastAPI(title="AI Server (Google Sheets + FAISS)")
 
 class Query(BaseModel):
     question: str
+    user_id: str = "unknown" # Add user_id to the query model
 
 class Record(BaseModel):
     name: str
@@ -66,14 +67,28 @@ def startup_event():
 def ask_question(query: Query):
     """
     Основной эндпоинт, куда обращается бот.
+    Теперь он также логирует данные для аналитики.
     """
-    logger.info(f"Получен вопрос: {query.question}")
+    start_time = time.time()
+    logger.info(f"Получен вопрос от user_id={query.user_id}: {query.question}")
+
     if not query.question:
         logger.error("Получен пустой вопрос.")
         raise HTTPException(status_code=400, detail="Вопрос не может быть пустым")
 
     answer = search_index(query.question)
-    logger.info(f"Ответ: {answer}")
+
+    end_time = time.time()
+    response_time = end_time - start_time
+
+    # Запускаем логирование в фоновом потоке, чтобы не задерживать ответ боту
+    log_thread = threading.Thread(
+        target=log_question,
+        args=(query.user_id, query.question, answer, response_time)
+    )
+    log_thread.start()
+
+    logger.info(f"Ответ: {answer} (время ответа: {response_time:.2f}s)")
     return {"answer": answer}
 
 @app.get("/records")

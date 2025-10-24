@@ -124,6 +124,37 @@ def get_user_records():
         print(f"Ошибка при чтении записей пользователей: {e}")
         return []
 
+def log_question(user_id: str, question: str, answer: str, response_time: float):
+    """
+    Logs a question and its analytics data to the FIRST worksheet.
+    """
+    try:
+        sheet = _get_sheet(0)
+        if not sheet:
+            print("Ошибка: Первый лист для логов не найден. Не могу записать данные аналитики.")
+            return
+
+        # Prepare the row with a timestamp and status
+        from datetime import datetime
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        status = 'success' if answer else 'fail'
+
+        # This assumes your sheet has the columns in this order.
+        # It's important to match the order in your Google Sheet.
+        sheet.append_row([
+            timestamp,
+            user_id,
+            question,
+            answer,
+            response_time,
+            status
+        ], value_input_option='USER_ENTERED')
+        print(f"Вопрос залогирован: user_id={user_id}, time={response_time:.2f}s")
+
+    except Exception as e:
+        print(f"Ошибка при логировании вопроса в Google Sheets: {e}")
+
+
 def add_record(name: str, phone: str, email: str):
     """
     Adds a new record to the SECOND worksheet.
