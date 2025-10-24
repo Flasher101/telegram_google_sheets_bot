@@ -10,7 +10,6 @@ SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
     'https://www.googleapis.com/auth/drive'
 ]
-# Define worksheet titles to ensure we're reading from the right place
 INTERACTION_LOGS_SHEET_TITLE = "Interaction Logs"
 FEEDBACK_SHEET_TITLE = "User Feedback"
 
@@ -18,7 +17,6 @@ FEEDBACK_SHEET_TITLE = "User Feedback"
 
 def get_credentials_path():
     """Gets the absolute path to the service_account.json file."""
-    # Assumes this script is in dashboard/utils, so we go up three levels to the root
     root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     return os.path.join(root_dir, 'service_account.json')
 
@@ -27,11 +25,23 @@ def _get_client():
     creds = Credentials.from_service_account_file(get_credentials_path(), scopes=SCOPES)
     return gspread.authorize(creds)
 
+def _create_empty_log_df():
+    """Creates an empty DataFrame with correctly typed columns for interaction logs."""
+    return pd.DataFrame({
+        'timestamp': pd.Series(dtype='datetime64[ns]'),
+        'user_id': pd.Series(dtype='str'),
+        'question': pd.Series(dtype='str'),
+        'answer': pd.Series(dtype='str'),
+        'response_time': pd.Series(dtype='float'),
+        'status': pd.Series(dtype='str')
+    })
+
 # --- Main Data Loading Functions ---
 
 def load_sheets_data():
     """
     Loads user interaction data from the 'Interaction Logs' worksheet in Google Sheets.
+    Returns a correctly typed DataFrame, even if the sheet is empty or does not exist.
     """
     try:
         client = _get_client()
@@ -41,24 +51,27 @@ def load_sheets_data():
         try:
             sheet = spreadsheet.worksheet(INTERACTION_LOGS_SHEET_TITLE)
         except WorksheetNotFound:
-            # If the sheet doesn't exist, the bot/server hasn't created it yet.
-            # Return an empty DataFrame with the expected columns to prevent errors.
             print(f"WARNING: Worksheet '{INTERACTION_LOGS_SHEET_TITLE}' not found. Returning empty DataFrame.")
-            return pd.DataFrame(columns=['timestamp', 'user_id', 'question', 'answer', 'response_time', 'status'])
+            return _create_empty_log_df()
 
         data = sheet.get_all_records()
+        if not data:
+            print(f"INFO: Worksheet '{INTERACTION_LOGS_SHEET_TITLE}' is empty. Returning empty DataFrame.")
+            return _create_empty_log_df()
+
         df = pd.DataFrame(data)
 
-        # Ensure timestamp column is correctly typed
+        # Ensure columns are correctly typed after loading
         if 'timestamp' in df.columns:
             df['timestamp'] = pd.to_datetime(df['timestamp'])
+        if 'response_time' in df.columns:
+            df['response_time'] = pd.to_numeric(df['response_time'], errors='coerce')
 
         return df
 
     except Exception as e:
         print(f"ERROR loading interaction data from Google Sheets: {e}")
-        # Return an empty DataFrame on other errors to allow the dashboard to run
-        return pd.DataFrame(columns=['timestamp', 'user_id', 'question', 'answer', 'response_time', 'status'])
+        return _create_empty_log_df()
 
 def get_stats(df, date_from, date_to):
     """Calculates statistics for the dashboard metrics."""
