@@ -283,7 +283,7 @@ async def send_instruction_document(callback_query: types.CallbackQuery):
     file_path, caption = file_info
 
     try:
-        await callback_query.message.answer_chat_action('upload_document')
+        await bot.send_chat_action(callback_query.message.chat.id, 'upload_document')
         document = FSInputFile(file_path, filename=file_path.split('/')[-1])
         await callback_query.message.answer_document(
             document,
