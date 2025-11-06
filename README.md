@@ -65,6 +65,15 @@ This project provides a Telegram bot that can answer questions using a FAISS vec
     ./start.sh
     ```
 
+## Adding Files for the Bot
+
+Some bot functions, like sending technical documentation, require you to add files to the project.
+
+-   **Technical Documentation:**
+    1.  Create a folder named `documents` in the root of the project.
+    2.  Place your technical documentation file inside this folder.
+    3.  **Important:** The bot is currently configured to send a file named `tech_docs_placeholder.rar`. You must either rename your file to `tech_docs_placeholder.rar` or update the file path in `bot/bot_main.py` in the `send_tech_documentation` function.
+
 ## Running the Dashboard
 
 1.  **Install the dependencies:**

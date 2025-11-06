@@ -11,7 +11,7 @@ import sys
 import logging
 from logging.handlers import RotatingFileHandler
 import asyncio
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 
 # --- Logging Setup ---
 log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -71,8 +71,9 @@ def call_center_keyboard():
 
 def instructions_keyboard():
     """Creates the keyboard for the 'Instructions' submenu."""
+    video_url = "https://www.youtube.com/watch?v=yMadR9ITo9I&list=PL3JrZkZtKh8DhCWvpsrHUdI9tZWkoqr9Z"
     buttons = [
-        [InlineKeyboardButton(text="Видеоинструкции", callback_data="instruction_video")],
+        [InlineKeyboardButton(text="Видеоинструкции", url=video_url)],
         [InlineKeyboardButton(text="Техническая документация", callback_data="instruction_tech")],
         [InlineKeyboardButton(text="Инструкции пользователей", callback_data="instruction_user")],
         [InlineKeyboardButton(text="Регистрация в системе", callback_data="instruction_reg")],
@@ -263,14 +264,47 @@ async def return_to_main_menu(callback_query: types.CallbackQuery):
 
 # --- Placeholder Handlers for Instructions ---
 
-@dp.callback_query(F.data.startswith("instruction_"))
+@dp.callback_query(F.data.startswith("instruction_") & (F.data != "instruction_tech"))
 async def instruction_placeholder(callback_query: types.CallbackQuery):
-    """Placeholder for all instruction buttons."""
-    section_name = callback_query.data.replace("instruction_", "")
+    """Placeholder for all instruction buttons, except tech docs."""
+    # A simple way to make the text more user-friendly
+    section_map = {
+        "user": "Инструкции пользователей",
+        "reg": "Регистрация в системе",
+        "non_resident": "Алгоритм для не резидентов"
+    }
+    section_key = callback_query.data.replace("instruction_", "")
+    section_name = section_map.get(section_key, section_key) # Fallback to key if not in map
+
     await callback_query.answer(
         f"Раздел '{section_name}' находится в разработке.",
         show_alert=True
     )
+
+@dp.callback_query(F.data == "instruction_tech")
+async def send_tech_documentation(callback_query: types.CallbackQuery):
+    """Sends the technical documentation file."""
+    file_path = "documents/tech_docs_placeholder.rar"
+    try:
+        await callback_query.message.answer_chat_action('upload_document')
+        document = FSInputFile(file_path)
+        await callback_query.message.answer_document(
+            document,
+            caption="Вот техническая документация."
+        )
+        await callback_query.answer()
+    except FileNotFoundError:
+        logger.error(f"File not found at path: {file_path}")
+        await callback_query.answer(
+            "Файл с документацией не найден. Обратитесь к администратору.",
+            show_alert=True
+        )
+    except Exception as e:
+        logger.error(f"Error sending document: {e}")
+        await callback_query.answer(
+            "Произошла ошибка при отправке файла.",
+            show_alert=True
+        )
 
 async def main():
     logger.info("Бот запускается...")
