@@ -18,3 +18,9 @@ FAISS_INDEX_PATH = "faiss_index/index.faiss"
 
 # Base URL of the AI server
 AI_SERVER_URL = "http://localhost:8000"
+
+# --- Call Center Contact Information (for new buttons) ---
+# WhatsApp number in international format without '+' or spaces (e.g., 77001234567)
+CALL_CENTER_WHATSAPP_NUMBER = "77001234567"
+# Telegram username (without the '@')
+CALL_CENTER_TELEGRAM_USERNAME = "YourTelegramUsername"

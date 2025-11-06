@@ -50,11 +50,36 @@ class Form(StatesGroup):
 # --- Keyboards ---
 def main_menu_keyboard():
     buttons = [
-        [types.KeyboardButton(text="🤖 Консультация AI")],
-        [types.KeyboardButton(text="📄 Просмотр данных"), types.KeyboardButton(text="✍️ Добавить запись")],
-        [types.KeyboardButton(text="⚙️ Настройки")]
+        [InlineKeyboardButton(text="🤖 Консультация AI", callback_data="ai_consultation")],
+        [InlineKeyboardButton(text="📞 Номер КЦ", callback_data="call_center")],
+        [InlineKeyboardButton(text="📚 Инструкции", callback_data="instructions")]
     ]
-    keyboard = types.ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    return keyboard
+
+def call_center_keyboard():
+    """Creates the keyboard for the 'Call Center' submenu."""
+    # These will be read from config
+    from config import CALL_CENTER_WHATSAPP_NUMBER, CALL_CENTER_TELEGRAM_USERNAME
+    buttons = [
+        [InlineKeyboardButton(text="💬 WhatsApp", url=f"https://wa.me/{CALL_CENTER_WHATSAPP_NUMBER}")],
+        [InlineKeyboardButton(text="✈️ Telegram", url=f"https://t.me/{CALL_CENTER_TELEGRAM_USERNAME}")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu")]
+    ]
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    return keyboard
+
+def instructions_keyboard():
+    """Creates the keyboard for the 'Instructions' submenu."""
+    buttons = [
+        [InlineKeyboardButton(text="Видеоинструкции", callback_data="instruction_video")],
+        [InlineKeyboardButton(text="Техническая документация", callback_data="instruction_tech")],
+        [InlineKeyboardButton(text="Инструкции пользователей", callback_data="instruction_user")],
+        [InlineKeyboardButton(text="Регистрация в системе", callback_data="instruction_reg")],
+        [InlineKeyboardButton(text="Алгоритм для не резидентов", callback_data="instruction_non_resident")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu")]
+    ]
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     return keyboard
 
 def consultation_keyboard():
@@ -92,6 +117,7 @@ async def schedule_feedback(chat_id: int):
 async def cmd_start(msg: types.Message, state: FSMContext):
     logger.info(f"User {msg.from_user.id} started the bot.")
     await state.clear()
+    # Now we send the message with an inline keyboard
     await msg.answer(
         "Здравствуйте! Я ваш AI-ассистент. Выберите действие:",
         reply_markup=main_menu_keyboard()
@@ -106,10 +132,12 @@ async def cmd_help(msg: types.Message):
         "/help - показать это сообщение\n"
     )
 
-@dp.message(F.text == "🤖 Консультация AI")
-async def start_ai_consultation(msg: types.Message, state: FSMContext):
-    user_id = msg.from_user.id
-    logger.info(f"User {user_id} started AI consultation mode.")
+# Handler for the "AI Consultation" button from the main menu
+@dp.callback_query(F.data == "ai_consultation")
+async def start_ai_consultation(callback_query: types.CallbackQuery, state: FSMContext):
+    user_id = callback_query.from_user.id
+    logger.info(f"User {user_id} started AI consultation mode via inline button.")
+    await callback_query.answer() # Acknowledge the button press
 
     # Cancel any existing feedback timer for this user
     if user_id in feedback_timers:
@@ -118,7 +146,8 @@ async def start_ai_consultation(msg: types.Message, state: FSMContext):
         logger.info(f"Cancelled pending feedback request for user_id={user_id}")
 
     await state.set_state(Form.ai_consultation)
-    await msg.answer(
+    # Use callback_query.message.answer to reply
+    await callback_query.message.answer(
         "Вы вошли в режим консультации с AI.\n"
         "Теперь вы можете задавать вопросы без остановки.\n\n"
         "Чтобы выйти, нажмите кнопку ниже.",
@@ -203,73 +232,45 @@ async def process_feedback(callback_query: types.CallbackQuery):
     await callback_query.answer()
 
 
-@dp.message(F.text == "📄 Просмотр данных")
-async def view_data(msg: types.Message):
-    logger.info(f"User {msg.from_user.id} requested to view data.")
-    try:
-        response = requests.get(f"{AI_SERVER_URL}/records", timeout=15)
-        response.raise_for_status()
-        records = response.json()
-        if records:
-            response_text = ""
-            for record in records:
-                response_text += f"Имя: {record.get('name', 'N/A')}, Телефон: {record.get('phone', 'N/A')}, Email: {record.get('email', 'N/A')}\n"
-            await msg.answer(response_text)
-        else:
-            await msg.answer("В таблице пока нет записей.")
-    except requests.exceptions.Timeout:
-        logger.error(f"Ошибка API: Таймаут при запросе к {AI_SERVER_URL}")
-        await msg.answer("Сервер слишком долго не отвечает. Попробуйте еще раз позже.")
-    except requests.exceptions.ConnectionError:
-        logger.error(f"Ошибка API: Не удалось подключиться к {AI_SERVER_URL}")
-        await msg.answer("Ошибка: AI-сервер недоступен. Свяжитесь с администратором.")
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Ошибка API: {e}")
-        await msg.answer("Произошла ошибка при обработке вашего запроса. Попробуйте позже.")
+# --- New Callback Handlers for Submenus ---
 
-@dp.message(F.text == "✍️ Добавить запись")
-async def add_record_start(msg: types.Message, state: FSMContext):
-    logger.info(f"User {msg.from_user.id} wants to add a record.")
-    await state.set_state(Form.name)
-    await msg.answer("Введите имя:")
+@dp.callback_query(F.data == "call_center")
+async def show_call_center_menu(callback_query: types.CallbackQuery):
+    """Shows the call center contact submenu."""
+    await callback_query.message.edit_text(
+        "Выберите способ связи:",
+        reply_markup=call_center_keyboard()
+    )
+    await callback_query.answer()
 
-@dp.message(Form.name)
-async def process_name(msg: types.Message, state: FSMContext):
-    await state.update_data(name=msg.text)
-    await state.set_state(Form.phone)
-    await msg.answer("Введите телефон:")
+@dp.callback_query(F.data == "instructions")
+async def show_instructions_menu(callback_query: types.CallbackQuery):
+    """Shows the instructions submenu."""
+    await callback_query.message.edit_text(
+        "Выберите раздел инструкций:",
+        reply_markup=instructions_keyboard()
+    )
+    await callback_query.answer()
 
-@dp.message(Form.phone)
-async def process_phone(msg: types.Message, state: FSMContext):
-    await state.update_data(phone=msg.text)
-    await state.set_state(Form.email)
-    await msg.answer("Введите email:")
+@dp.callback_query(F.data == "main_menu")
+async def return_to_main_menu(callback_query: types.CallbackQuery):
+    """Returns the user to the main menu."""
+    await callback_query.message.edit_text(
+        "Здравствуйте! Я ваш AI-ассистент. Выберите действие:",
+        reply_markup=main_menu_keyboard()
+    )
+    await callback_query.answer()
 
-@dp.message(Form.email)
-async def process_email(msg: types.Message, state: FSMContext):
-    await state.update_data(email=msg.text)
-    user_data = await state.get_data()
-    await state.clear()
+# --- Placeholder Handlers for Instructions ---
 
-    logger.info(f"User {msg.from_user.id} added a record: {user_data}")
-    try:
-        response = requests.post(f"{AI_SERVER_URL}/records", json=user_data, timeout=15)
-        response.raise_for_status()
-        await msg.answer("Запись успешно добавлена!", reply_markup=main_menu_keyboard())
-    except requests.exceptions.Timeout:
-        logger.error(f"Ошибка API: Таймаут при запросе к {AI_SERVER_URL}")
-        await msg.answer("Сервер слишком долго не отвечает. Попробуйте еще раз позже.")
-    except requests.exceptions.ConnectionError:
-        logger.error(f"Ошибка API: Не удалось подключиться к {AI_SERVER_URL}")
-        await msg.answer("Ошибка: AI-сервер недоступен. Свяжитесь с администратором.")
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Ошибка API: {e}")
-        await msg.answer("Произошла ошибка при добавлении записи. Попробуйте позже.")
-
-@dp.message(F.text == "⚙️ Настройки")
-async def settings(msg: types.Message):
-    logger.info(f"User {msg.from_user.id} accessed settings.")
-    await msg.answer("Раздел настроек находится в разработке.")
+@dp.callback_query(F.data.startswith("instruction_"))
+async def instruction_placeholder(callback_query: types.CallbackQuery):
+    """Placeholder for all instruction buttons."""
+    section_name = callback_query.data.replace("instruction_", "")
+    await callback_query.answer(
+        f"Раздел '{section_name}' находится в разработке.",
+        show_alert=True
+    )
 
 async def main():
     logger.info("Бот запускается...")
