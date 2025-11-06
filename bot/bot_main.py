@@ -262,45 +262,42 @@ async def return_to_main_menu(callback_query: types.CallbackQuery):
     )
     await callback_query.answer()
 
-# --- Placeholder Handlers for Instructions ---
+# --- Handlers for Instructions ---
 
-@dp.callback_query(F.data.startswith("instruction_") & (F.data != "instruction_tech"))
-async def instruction_placeholder(callback_query: types.CallbackQuery):
-    """Placeholder for all instruction buttons, except tech docs."""
-    # A simple way to make the text more user-friendly
-    section_map = {
-        "user": "Инструкции пользователей",
-        "reg": "Регистрация в системе",
-        "non_resident": "Алгоритм для не резидентов"
+@dp.callback_query(F.data.startswith("instruction_"))
+async def send_instruction_document(callback_query: types.CallbackQuery):
+    """Handles all instruction buttons and sends the corresponding document."""
+    file_map = {
+        "instruction_tech": ("documents/contract.pdf", "Вот техническая документация."),
+        "instruction_user": ("documents/instruction_user.pdf", "Вот инструкции для пользователей."),
+        "instruction_reg": ("documents/instruction_reg.pdf", "Вот инструкция по регистрации в системе."),
+        "instruction_non_resident": ("documents/instruction_non_resident.pdf", "Вот алгоритм для нерезидентов."),
     }
-    section_key = callback_query.data.replace("instruction_", "")
-    section_name = section_map.get(section_key, section_key) # Fallback to key if not in map
 
-    await callback_query.answer(
-        f"Раздел '{section_name}' находится в разработке.",
-        show_alert=True
-    )
+    file_info = file_map.get(callback_query.data)
 
-@dp.callback_query(F.data == "instruction_tech")
-async def send_tech_documentation(callback_query: types.CallbackQuery):
-    """Sends the technical documentation file."""
-    file_path = "documents/tech_docs_placeholder.rar"
+    if not file_info:
+        await callback_query.answer("Неизвестная команда.", show_alert=True)
+        return
+
+    file_path, caption = file_info
+
     try:
         await callback_query.message.answer_chat_action('upload_document')
-        document = FSInputFile(file_path)
+        document = FSInputFile(file_path, filename=file_path.split('/')[-1])
         await callback_query.message.answer_document(
             document,
-            caption="Вот техническая документация."
+            caption=caption
         )
         await callback_query.answer()
     except FileNotFoundError:
-        logger.error(f"File not found at path: {file_path}")
+        logger.error(f"File not found at path: {file_path} for instruction {callback_query.data}")
         await callback_query.answer(
             "Файл с документацией не найден. Обратитесь к администратору.",
             show_alert=True
         )
     except Exception as e:
-        logger.error(f"Error sending document: {e}")
+        logger.error(f"Error sending document for instruction {callback_query.data}: {e}")
         await callback_query.answer(
             "Произошла ошибка при отправке файла.",
             show_alert=True
