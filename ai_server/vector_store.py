@@ -5,7 +5,7 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 import os
 from config import FAISS_INDEX_PATH
-from langdetect import detect
+import langid
 from deep_translator import GoogleTranslator
 
 # Используем ту же модель, что и обсуждали
@@ -62,8 +62,10 @@ def search_index(query: str):
         return "Индекс еще не создан или пуст. Пожалуйста, подождите."
 
     try:
-        lang = detect(query)
-    except:
+        # langid.classify() возвращает кортеж (язык, уверенность)
+        lang, _ = langid.classify(query)
+    except Exception as e:
+        print(f"Ошибка определения языка: {e}")
         lang = "en"  # Default to English if detection fails
 
     # 1. Если язык не русский, переводим запрос на русский для поиска
