@@ -9,7 +9,7 @@ aiogram
 requests
 numpy
 aiohttp
-langdetect
+langid
 
 # Dependencies for the Streamlit dashboard
 streamlit>=1.28.0
