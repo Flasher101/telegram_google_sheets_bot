@@ -5,6 +5,8 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 import os
 from config import FAISS_INDEX_PATH
+from langdetect import detect
+from deep_translator import GoogleTranslator
 
 # Используем ту же модель, что и обсуждали
 MODEL_NAME = 'all-MiniLM-L6-v2'
@@ -28,7 +30,7 @@ def build_or_load_index(records: list):
     """
     global index, answer_storage
     os.makedirs(os.path.dirname(INDEX_PATH), exist_ok=True)
-    
+
     if not records:
         print("Нет записей для индексации.")
         return
@@ -36,16 +38,16 @@ def build_or_load_index(records: list):
     questions = [record['Вопрос'] for record in records]
     # Обновляем наше хранилище ответов
     answer_storage = [record['Ответ'] for record in records]
-    
+
     print(f"Генерация эмбеддингов для {len(questions)} вопросов...")
     embeddings = model.encode(questions, convert_to_numpy=True, normalize_embeddings=True)
     # FAISS требует float32
-    embeddings = embeddings.astype('float32') 
-    
+    embeddings = embeddings.astype('float32')
+
     # Создаем индекс FAISS. IndexFlatIP = поиск по внутреннему произведению (эффективен для норм. векторов)
     index = faiss.IndexFlatIP(EMBEDDING_DIM)
     index.add(embeddings)
-    
+
     print(f"Индекс создан. Запись в {INDEX_PATH}...")
     faiss.write_index(index, INDEX_PATH)
 
@@ -56,24 +58,53 @@ def search_index(query: str):
     global index, answer_storage
     if index is None or not answer_storage:
         return "Индекс еще не создан или пуст. Пожалуйста, подождите."
-    
+
+    try:
+        lang = detect(query)
+    except:
+        lang = "en"  # Default to English if detection fails
+
     # 1. Создаем эмбеддинг для запроса
     query_embedding = model.encode([query], convert_to_numpy=True, normalize_embeddings=True)
     query_embedding = query_embedding.astype('float32')
-    
+
     # 2. Ищем k=1 (1 ближайший)
     # D = Расстояния (scores), I = Индексы (ID)
-    D, I = index.search(query_embedding, k=1) 
-    
+    D, I = index.search(query_embedding, k=1)
+
     best_score = D[0][0]
     best_idx = I[0][0]
-    
-    print(f"Поиск: '{query[:20]}...' | Лучший Score={best_score:.4f} | Индекс={best_idx}")
+
+    print(f"Поиск: '{query[:20]}...' | Язык: {lang} | Лучший Score={best_score:.4f} | Индекс={best_idx}")
 
     # 3. Порог релевантности (подберите под свои данные)
     # 0.60 - довольно строгий. 0.5 - более мягкий.
-    if best_score < 0.55: 
-        return "Извините, я не нашел точного ответа. Попробуйте переформулировать вопрос или свяжитесь с КЦ."
-    
-    # Возвращаем ответ по найденному индексу
-    return answer_storage[best_idx]
+    if best_score < 0.55:
+        if lang == "ru":
+            return "Извините, я не нашел точного ответа. Попробуйте переформулировать вопрос или свяжитесь с КЦ."
+        else:
+            # Переводим сообщение "не найдено" на язык пользователя
+            try:
+                translated_not_found = GoogleTranslator(source='ru', target=lang).translate("Извините, я не нашел точного ответа. Попробуйте переформулировать вопрос или свяжитесь с КЦ.")
+                return translated_not_found
+            except Exception as e:
+                print(f"Ошибка перевода 'не найдено': {e}")
+                return "Sorry, I couldn't find an exact answer. Please try rephrasing the question or contact the call center."
+
+    # 4. Возвращаем ответ
+    retrieved_answer = answer_storage[best_idx]
+
+    # 5. Переводим ответ, если язык запроса не русский
+    if lang != 'ru':
+        try:
+            print(f"Перевод ответа на '{lang}'...")
+            # Исходный язык у нас всегда 'ru', целевой - 'lang'
+            translated_answer = GoogleTranslator(source='ru', target=lang).translate(retrieved_answer)
+            return translated_answer
+        except Exception as e:
+            print(f"Ошибка перевода: {e}")
+            # Если перевод не удался, возвращаем оригинал
+            return retrieved_answer
+
+    # Если язык русский, просто возвращаем ответ
+    return retrieved_answer
