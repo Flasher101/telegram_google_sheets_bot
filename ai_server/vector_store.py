@@ -41,7 +41,13 @@ def build_or_load_index(records: list):
     Создает или перезаписывает индекс FAISS на основе записей, используя эмбеддинги OpenAI.
     """
     global index, answer_storage
-    os.makedirs(os.path.dirname(INDEX_PATH), exist_ok=True)
+
+    # Получаем директорию из пути к файлу индекса
+    index_dir = os.path.dirname(INDEX_PATH)
+
+    # Создаем директорию, только если путь к ней не пустой
+    if index_dir:
+        os.makedirs(index_dir, exist_ok=True)
 
     if not records:
         print("Нет записей для индексации.")
