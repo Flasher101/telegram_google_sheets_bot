@@ -2,7 +2,9 @@
 
 import faiss
 import numpy as np
-import openai
+from openai import OpenAI
+
+client = OpenAI(api_key=OPENAI_API_KEY)
 import os
 from config import FAISS_INDEX_PATH, OPENAI_API_KEY
 import langid
@@ -14,7 +16,6 @@ MODEL_NAME = 'text-embedding-3-small'
 # Размер эмбеддинга для этой модели
 EMBEDDING_DIM = 1536
 # Устанавливаем ключ API
-openai.api_key = OPENAI_API_KEY
 
 # --- FAISS Configuration ---
 INDEX_PATH = FAISS_INDEX_PATH
@@ -28,8 +29,8 @@ def get_openai_embedding(text: str) -> np.ndarray:
     Получает эмбеддинг для текста с использованием OpenAI API.
     """
     try:
-        response = openai.Embedding.create(input=[text], model=MODEL_NAME)
-        embedding = response['data'][0]['embedding']
+        response = client.embeddings.create(input=[text], model=MODEL_NAME)
+        embedding = response.data[0].embedding
         return np.array(embedding)
     except Exception as e:
         print(f"Ошибка при получении эмбеддинга от OpenAI: {e}")
