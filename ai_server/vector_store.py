@@ -3,19 +3,19 @@
 import faiss
 import numpy as np
 from openai import OpenAI
-
-client = OpenAI(api_key=OPENAI_API_KEY)
 import os
 from config import FAISS_INDEX_PATH, OPENAI_API_KEY
 import langid
 from deep_translator import GoogleTranslator
+
+# Initialize the OpenAI client after importing the key
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 # --- OpenAI Configuration ---
 # Используем новую модель эмбеддингов от OpenAI
 MODEL_NAME = 'text-embedding-3-small'
 # Размер эмбеддинга для этой модели
 EMBEDDING_DIM = 1536
-# Устанавливаем ключ API
 
 # --- FAISS Configuration ---
 INDEX_PATH = FAISS_INDEX_PATH
