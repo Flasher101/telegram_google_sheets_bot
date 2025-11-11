@@ -54,7 +54,7 @@ trap cleanup SIGINT SIGTERM EXIT
 # --- Service Launch ---
 # Start AI server in the background
 echo "Starting AI server... Log: logs/ai_server.log"
-python -m uvicorn ai_server.main:app --host 127.0.0.1 --port 8000 > logs/ai_server.log 2>&1 &
+python -m uvicorn ai_server.main:app --host 0.0.0.0 --port 8000 > logs/ai_server.log 2>&1 &
 AI_SERVER_PID=$!
 
 # Start the Telegram bot in the background

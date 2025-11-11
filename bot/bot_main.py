@@ -78,6 +78,7 @@ def instructions_keyboard():
         [InlineKeyboardButton(text="Инструкции пользователей", callback_data="instruction_user")],
         [InlineKeyboardButton(text="Регистрация в системе", callback_data="instruction_reg")],
         [InlineKeyboardButton(text="Алгоритм для не резидентов", callback_data="instruction_non_resident")],
+        [InlineKeyboardButton(text="Архив с документами", callback_data="instruction_archive")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu")]
     ]
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -272,6 +273,7 @@ async def send_instruction_document(callback_query: types.CallbackQuery):
         "instruction_user": ("documents/instruction_user.pdf", "Вот инструкции для пользователей."),
         "instruction_reg": ("documents/instruction_reg.pdf", "Вот инструкция по регистрации в системе."),
         "instruction_non_resident": ("documents/instruction_non_resident.pdf", "Вот алгоритм для нерезидентов."),
+        "instruction_archive": ("documents/archive.rar", "Вот архив с документами."),
     }
 
     file_info = file_map.get(callback_query.data)

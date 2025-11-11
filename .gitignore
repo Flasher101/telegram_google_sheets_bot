@@ -126,5 +126,5 @@ cython_debug/
 config.py
 service_account.json
 
-# Archives
-*.rar
+# FAISS index
+faiss_index/
