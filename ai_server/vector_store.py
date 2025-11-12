@@ -42,12 +42,16 @@ def build_or_load_index(records: list):
     """
     global index, answer_storage
 
-    # Получаем директорию из пути к файлу индекса
-    index_dir = os.path.dirname(INDEX_PATH)
+    # --- Robust Path Handling ---
+    # Преобразуем путь в абсолютный для избежания проблем с относительными путями
+    abs_index_path = os.path.abspath(INDEX_PATH)
+    # Получаем директорию из абсолютного пути
+    index_dir = os.path.dirname(abs_index_path)
 
-    # Создаем директорию, только если путь к ней не пустой
-    if index_dir:
-        os.makedirs(index_dir, exist_ok=True)
+    # Создаем директорию, если она не существует.
+    # Это предотвращает ошибку 'Permission Denied' при записи файла.
+    if index_dir and not os.path.exists(index_dir):
+        os.makedirs(index_dir)
 
     if not records:
         print("Нет записей для индексации.")
@@ -69,8 +73,8 @@ def build_or_load_index(records: list):
     index = faiss.IndexFlatIP(EMBEDDING_DIM)
     index.add(embeddings_np)
 
-    print(f"Индекс создан. Запись в {INDEX_PATH}...")
-    faiss.write_index(index, INDEX_PATH)
+    print(f"Индекс создан. Запись в {abs_index_path}...")
+    faiss.write_index(index, abs_index_path)
 
 def search_index(query: str):
     """
