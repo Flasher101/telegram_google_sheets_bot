@@ -12,10 +12,17 @@ import logging
 from logging.handlers import RotatingFileHandler
 import asyncio
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+import os
 
 # --- Logging Setup ---
+# Build absolute path for the log file to ensure it works regardless of script launch location
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+log_dir = os.path.join(project_root, 'logs')
+os.makedirs(log_dir, exist_ok=True) # Create logs directory if it doesn't exist
+
+log_file = os.path.join(log_dir, 'bot.log')
 log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-log_file = 'logs/bot.log'
 log_handler = RotatingFileHandler(log_file, maxBytes=1024*1024*5, backupCount=5)
 log_handler.setFormatter(log_formatter)
 log_handler.setLevel(logging.INFO)
@@ -41,8 +48,9 @@ dp = Dispatcher(storage=storage)
 feedback_timers = {}
 
 class Form(StatesGroup):
-    ai_consultation = State() # Новый стейт для режима консультации
-    question = State() # Этот стейт больше не будет использоваться для AI, но оставим для обратной совместимости или других целей
+    ai_consultation = State()
+    awaiting_clarification = State() # State for when the bot is waiting for user to clarify their question
+    question = State()
     name = State()
     phone = State()
     email = State()
@@ -174,38 +182,88 @@ async def stop_consultation(msg: types.Message, state: FSMContext):
         reply_markup=main_menu_keyboard()
     )
 
-# Этот хендлер теперь будет ловить любые сообщения, пока пользователь в режиме консультации
+# This handler catches any message when the user is in consultation mode
 @dp.message(Form.ai_consultation, F.text)
 async def process_ai_question(msg: types.Message, state: FSMContext):
     question_text = msg.text
     logger.info(f"User {msg.from_user.id} (in consultation mode) asked: {question_text}")
 
-    # Показываем индикатор "печатает..."
     await bot.send_chat_action(msg.chat.id, 'typing')
 
     try:
-        # Теперь отправляем и user_id для аналитики
         payload = {
             "question": question_text,
-            "user_id": str(msg.from_user.id) # Убедимся, что ID это строка
+            "user_id": str(msg.from_user.id)
         }
-        response = requests.post(f"{AI_SERVER_URL}/ask", json=payload, timeout=30)
+        response = requests.post(f"{AI_SERVER_URL}/ask", json=payload, timeout=60) # Increased timeout for LLM
         response.raise_for_status()
-
         data = response.json()
-        await msg.answer(data.get('answer', 'Не удалось получить ответ от сервера.'))
+
+        response_type = data.get("type")
+        content = data.get("content")
+
+        if response_type == "clarification":
+            # Store the original question and switch state
+            await state.update_data(original_question=question_text)
+            await state.set_state(Form.awaiting_clarification)
+            await msg.answer(content)
+            logger.info(f"Sent clarification request to user {msg.from_user.id}. New state: awaiting_clarification.")
+        elif response_type == "answer":
+            await msg.answer(content)
+        else:
+            await msg.answer("Получен неожиданный ответ от сервера. Попробуйте позже.")
 
     except requests.exceptions.Timeout:
-        logger.error(f"Ошибка API: Таймаут при запросе к {AI_SERVER_URL}")
+        logger.error(f"API Error: Timeout when requesting {AI_SERVER_URL}")
         await msg.answer("Сервер слишком долго не отвечает. Попробуйте еще раз позже.")
     except requests.exceptions.ConnectionError:
-        logger.error(f"Ошибка API: Не удалось подключиться к {AI_SERVER_URL}")
+        logger.error(f"API Error: Could not connect to {AI_SERVER_URL}")
         await msg.answer("Ошибка: AI-сервер недоступен. Свяжитесь с администратором.")
     except requests.exceptions.RequestException as e:
-        logger.error(f"Ошибка API: {e}")
+        logger.error(f"API Error: {e}")
         await msg.answer("Произошла ошибка при обработке вашего запроса. Попробуйте позже.")
 
-    # Стейт не сбрасываем, пользователь может продолжать задавать вопросы
+
+# Handler for when the bot is waiting for the user to clarify their ambiguous question
+@dp.message(Form.awaiting_clarification, F.text)
+async def process_clarification(msg: types.Message, state: FSMContext):
+    clarification_text = msg.text
+    user_data = await state.get_data()
+    original_question = user_data.get('original_question')
+
+    if not original_question:
+        await msg.answer("Произошла ошибка: не удалось найти ваш исходный вопрос. Пожалуйста, задайте его снова.")
+        await state.set_state(Form.ai_consultation)
+        return
+
+    # Combine the original question with the user's clarification
+    enriched_question = f"{original_question} (уточнение: {clarification_text})"
+
+    logger.info(f"User {msg.from_user.id} provided clarification. New enriched query: {enriched_question}")
+
+    await bot.send_chat_action(msg.chat.id, 'typing')
+
+    # Return to the main consultation state to process the new query
+    await state.set_state(Form.ai_consultation)
+
+    try:
+        payload = {
+            "question": enriched_question,
+            "user_id": str(msg.from_user.id)
+        }
+        response = requests.post(f"{AI_SERVER_URL}/ask", json=payload, timeout=60)
+        response.raise_for_status()
+        data = response.json()
+
+        # By now, the answer should be direct and not a clarification
+        await msg.answer(data.get("content", "Не удалось получить окончательный ответ от сервера."))
+
+    except requests.exceptions.Timeout:
+        logger.error(f"API Error: Timeout when requesting enriched answer from {AI_SERVER_URL}")
+        await msg.answer("Сервер не ответил вовремя. Попробуйте задать вопрос еще раз.")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"API Error on enriched query: {e}")
+        await msg.answer("Произошла ошибка при обработке вашего уточненного запроса.")
 
 
 # Старый обработчик вопроса (больше не используется, можно удалить)
