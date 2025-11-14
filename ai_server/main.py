@@ -80,20 +80,23 @@ def ask_question(query: Query):
         logger.error("Получен пустой вопрос.")
         raise HTTPException(status_code=400, detail="Вопрос не может быть пустым")
 
-    answer = search_index(query.question)
+    response_data = search_index(query.question)
 
     end_time = time.time()
     response_time = end_time - start_time
 
+    # Log the content of the response, whether it's an answer or clarification
+    log_content = response_data.get("content", "")
+
     # Запускаем логирование в фоновом потоке, чтобы не задерживать ответ боту
     log_thread = threading.Thread(
         target=log_question,
-        args=(query.user_id, query.question, answer, response_time)
+        args=(query.user_id, query.question, log_content, response_time)
     )
     log_thread.start()
 
-    logger.info(f"Ответ: {answer} (время ответа: {response_time:.2f}s)")
-    return {"answer": answer}
+    logger.info(f"Response: {response_data} (response time: {response_time:.2f}s)")
+    return response_data
 
 @app.get("/records")
 def get_records():
