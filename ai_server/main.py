@@ -1,6 +1,7 @@
 # ai_server/main.py
 
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from ai_server.g_sheets import get_all_records, get_user_records, add_record, log_question, log_feedback
 from ai_server.vector_store import build_or_load_index, search_index
@@ -23,6 +24,9 @@ logger.addHandler(log_handler)
 logger.addHandler(logging.StreamHandler())
 
 app = FastAPI(title="AI Server (Google Sheets + FAISS)")
+
+# Mount the 'public' directory to serve static files
+app.mount("/public", StaticFiles(directory="public"), name="public")
 
 class Query(BaseModel):
     question: str
