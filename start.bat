@@ -29,15 +29,21 @@ call .venv\\Scripts\\activate
 REM Set PYTHONPATH to the project root
 set PYTHONPATH=%CD%
 
-REM Start AI server in the background
-echo Starting AI server...
-start "AI Server" python -m uvicorn ai_server.main:app --host 127.0.0.1 --port 8000
+REM Start AI server in a new window
+echo Starting AI server... Log: logs\ai_server.log
+start "AI Server" cmd /c "python -m uvicorn ai_server.main:app --host 127.0.0.1 --port 8000 > logs\ai_server.log 2>&1"
 
-REM Start the Telegram bot
-echo Starting Telegram bot...
-python bot/bot_main.py
+REM Start WhatsApp bot in a new window
+echo Starting WhatsApp bot... Log: logs\whatsapp_bot.log
+start "WhatsApp Bot" cmd /c "python -m uvicorn bot_whatsapp.main:app --host 127.0.0.1 --port 8001 > logs\whatsapp_bot.log 2>&1"
 
-REM Graceful shutdown
+REM Start the Telegram bot in the current window (this will block)
+echo Starting Telegram bot... Log: logs\telegram_bot.log
+python bot_telegram/bot_main.py > logs\telegram_bot.log 2>&1
+
+REM --- Graceful Shutdown ---
+echo Shutting down services...
 taskkill /F /FI "WINDOWTITLE eq AI Server" /T > nul
+taskkill /F /FI "WINDOWTITLE eq WhatsApp Bot" /T > nul
 
 deactivate

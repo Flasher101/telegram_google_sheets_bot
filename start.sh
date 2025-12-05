@@ -40,9 +40,13 @@ cleanup() {
         kill "$AI_SERVER_PID" 2>/dev/null
         echo "AI server stopped."
     fi
-    if [ -n "$BOT_PID" ]; then
-        kill "$BOT_PID" 2>/dev/null
+    if [ -n "$TELEGRAM_BOT_PID" ]; then
+        kill "$TELEGRAM_BOT_PID" 2>/dev/null
         echo "Telegram bot stopped."
+    fi
+    if [ -n "$WHATSAPP_BOT_PID" ]; then
+        kill "$WHATSAPP_BOT_PID" 2>/dev/null
+        echo "WhatsApp bot stopped."
     fi
     deactivate
     echo "Shutdown complete."
@@ -58,15 +62,23 @@ python -m uvicorn ai_server.main:app --host 0.0.0.0 --port 8000 > logs/ai_server
 AI_SERVER_PID=$!
 
 # Start the Telegram bot in the background
-echo "Starting Telegram bot... Log: logs/bot.log"
-python bot/bot_main.py > logs/bot.log 2>&1 &
-BOT_PID=$!
+echo "Starting Telegram bot... Log: logs/telegram_bot.log"
+python bot_telegram/bot_main.py > logs/telegram_bot.log 2>&1 &
+TELEGRAM_BOT_PID=$!
 
-echo "Both services started. AI Server PID: $AI_SERVER_PID, Bot PID: $BOT_PID"
-echo "Press Ctrl+C to stop both services."
+# Start the WhatsApp bot in the background
+echo "Starting WhatsApp bot... Log: logs/whatsapp_bot.log"
+python -m uvicorn bot_whatsapp.main:app --host 0.0.0.0 --port 8001 > logs/whatsapp_bot.log 2>&1 &
+WHATSAPP_BOT_PID=$!
 
-# Wait for either process to exit
-wait -n $AI_SERVER_PID $BOT_PID
+echo "All services started."
+echo "  - AI Server PID: $AI_SERVER_PID"
+echo "  - Telegram Bot PID: $TELEGRAM_BOT_PID"
+echo "  - WhatsApp Bot PID: $WHATSAPP_BOT_PID"
+echo "Press Ctrl+C to stop all services."
+
+# Wait for any process to exit
+wait -n $AI_SERVER_PID $TELEGRAM_BOT_PID $WHATSAPP_BOT_PID
 
 # If one process exits, the script will continue and the cleanup function will be called
 # This ensures that if one service crashes, the other is also stopped.
