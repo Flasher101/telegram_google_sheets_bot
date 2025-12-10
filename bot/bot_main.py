@@ -48,8 +48,16 @@ dp = Dispatcher(storage=storage)
 feedback_timers = {}
 
 class Form(StatesGroup):
+    # Main AI consultation states
     ai_consultation = State()
-    awaiting_clarification = State() # State for when the bot is waiting for user to clarify their question
+    awaiting_clarification = State()
+
+    # States for new menu navigation
+    product_group_selection = State()
+    mandatory_marking_selection = State()
+    pilot_group_selection = State()
+
+    # Legacy states (can be reviewed for removal if unused)
     question = State()
     name = State()
     phone = State()
@@ -58,12 +66,42 @@ class Form(StatesGroup):
 # --- Keyboards ---
 def main_menu_keyboard():
     buttons = [
-        [InlineKeyboardButton(text="🤖 Консультация AI", callback_data="ai_consultation")],
+        [InlineKeyboardButton(text="🤖 Консультация AI", callback_data="ai_consultation_menu")],
         [InlineKeyboardButton(text="📞 Номер КЦ", callback_data="call_center")],
         [InlineKeyboardButton(text="📚 Инструкции", callback_data="instructions")]
     ]
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     return keyboard
+
+def ai_consultation_menu_keyboard():
+    """Creates the initial AI consultation menu."""
+    buttons = [
+        [InlineKeyboardButton(text="ТГ по обязательной маркировке", callback_data="mandatory_marking")],
+        [InlineKeyboardButton(text="ТГ по пилотным группам", callback_data="pilot_groups")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def mandatory_marking_keyboard():
+    """Keyboard for mandatory marking product groups."""
+    buttons = [
+        [InlineKeyboardButton(text="Лекарственные средства", callback_data="product_group_Лекарственные средства")],
+        [InlineKeyboardButton(text="Табачная продукция", callback_data="product_group_Табачная продукция")],
+        [InlineKeyboardButton(text="Обувные товары", callback_data="product_group_Обувные товары")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="ai_consultation_menu")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def pilot_groups_keyboard():
+    """Keyboard for pilot product groups."""
+    buttons = [
+        [InlineKeyboardButton(text="Моторные масла", callback_data="product_group_Моторные масла")],
+        [InlineKeyboardButton(text="Пиво", callback_data="product_group_Пиво")],
+        [InlineKeyboardButton(text="Ювелирные изделия", callback_data="product_group_Ювелирные изделия")],
+        [InlineKeyboardButton(text="БАДы", callback_data="product_group_БАДы")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="ai_consultation_menu")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def call_center_keyboard():
     """Creates the keyboard for the 'Call Center' submenu."""
@@ -142,27 +180,63 @@ async def cmd_help(msg: types.Message):
         "/help - показать это сообщение\n"
     )
 
-# Handler for the "AI Consultation" button from the main menu
-@dp.callback_query(F.data == "ai_consultation")
-async def start_ai_consultation(callback_query: types.CallbackQuery, state: FSMContext):
-    user_id = callback_query.from_user.id
-    logger.info(f"User {user_id} started AI consultation mode via inline button.")
-    await callback_query.answer() # Acknowledge the button press
+# --- New Handlers for AI Consultation Menu ---
 
-    # Cancel any existing feedback timer for this user
+# Handler for the "AI Consultation" button from the main menu -> Shows product group categories
+@dp.callback_query(F.data == "ai_consultation_menu")
+async def show_ai_consultation_menu(callback_query: types.CallbackQuery, state: FSMContext):
+    await state.set_state(Form.product_group_selection)
+    await callback_query.message.edit_text(
+        "Выберите категорию товарной группы:",
+        reply_markup=ai_consultation_menu_keyboard()
+    )
+    await callback_query.answer()
+
+# Handler to show the Mandatory Marking product groups
+@dp.callback_query(F.data == "mandatory_marking", Form.product_group_selection)
+async def show_mandatory_marking_menu(callback_query: types.CallbackQuery, state: FSMContext):
+    await state.set_state(Form.mandatory_marking_selection)
+    await callback_query.message.edit_text(
+        "Выберите товарную группу (Обязательная маркировка):",
+        reply_markup=mandatory_marking_keyboard()
+    )
+    await callback_query.answer()
+
+# Handler to show the Pilot Product groups
+@dp.callback_query(F.data == "pilot_groups", Form.product_group_selection)
+async def show_pilot_groups_menu(callback_query: types.CallbackQuery, state: FSMContext):
+    await state.set_state(Form.pilot_group_selection)
+    await callback_query.message.edit_text(
+        "Выберите товарную группу (Пилотные группы):",
+        reply_markup=pilot_groups_keyboard()
+    )
+    await callback_query.answer()
+
+# Handler for when a user selects a specific product group
+@dp.callback_query(F.data.startswith("product_group_"))
+async def select_product_group(callback_query: types.CallbackQuery, state: FSMContext):
+    product_group = callback_query.data.split("product_group_")[1]
+    await state.update_data(product_group=product_group)
+    await state.set_state(Form.ai_consultation)
+
+    user_id = callback_query.from_user.id
+    logger.info(f"User {user_id} selected product group '{product_group}' and started AI consultation.")
+
+    # Cancel any existing feedback timer
     if user_id in feedback_timers:
         feedback_timers[user_id].cancel()
         del feedback_timers[user_id]
         logger.info(f"Cancelled pending feedback request for user_id={user_id}")
 
-    await state.set_state(Form.ai_consultation)
-    # Use callback_query.message.answer to reply
-    await callback_query.message.answer(
-        "Вы вошли в режим консультации с AI.\n"
-        "Теперь вы можете задавать вопросы без остановки.\n\n"
+    await callback_query.message.edit_text(
+        f"Вы выбрали: <b>{product_group}</b>.\n"
+        "Теперь вы можете задавать вопросы по этой теме.\n\n"
         "Чтобы выйти, нажмите кнопку ниже.",
-        reply_markup=consultation_keyboard()
+        parse_mode="HTML",
     )
+    # Also send a new message with the reply keyboard for exiting
+    await callback_query.message.answer("↓", reply_markup=consultation_keyboard())
+    await callback_query.answer()
 
 # Handler for the "Return to main menu" button
 @dp.message(F.text == "⬅️ Вернуться в главное меню", Form.ai_consultation)
@@ -185,17 +259,23 @@ async def stop_consultation(msg: types.Message, state: FSMContext):
 # This handler catches any message when the user is in consultation mode
 @dp.message(Form.ai_consultation, F.text)
 async def process_ai_question(msg: types.Message, state: FSMContext):
-    question_text = msg.text
-    logger.info(f"User {msg.from_user.id} (in consultation mode) asked: {question_text}")
+    user_question = msg.text
+    user_data = await state.get_data()
+    product_group = user_data.get("product_group", "Не указана") # Default fallback
+
+    # Prepend the context to the user's question
+    question_with_context = f"Товарная группа: {product_group}. Вопрос: {user_question}"
+
+    logger.info(f"User {msg.from_user.id} asked (with context): {question_with_context}")
 
     await bot.send_chat_action(msg.chat.id, 'typing')
 
     try:
         payload = {
-            "question": question_text,
+            "question": question_with_context,
             "user_id": str(msg.from_user.id)
         }
-        response = requests.post(f"{AI_SERVER_URL}/ask", json=payload, timeout=60) # Increased timeout for LLM
+        response = requests.post(f"{AI_SERVER_URL}/ask", json=payload, timeout=60)
         response.raise_for_status()
         data = response.json()
 
@@ -203,8 +283,8 @@ async def process_ai_question(msg: types.Message, state: FSMContext):
         content = data.get("content")
 
         if response_type == "clarification":
-            # Store the original question and switch state
-            await state.update_data(original_question=question_text)
+            # Store the original question with its context
+            await state.update_data(original_question=question_with_context)
             await state.set_state(Form.awaiting_clarification)
             await msg.answer(content)
             logger.info(f"Sent clarification request to user {msg.from_user.id}. New state: awaiting_clarification.")

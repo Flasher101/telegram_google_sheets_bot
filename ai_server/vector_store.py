@@ -178,7 +178,7 @@ def search_index(query: str):
                     {"role": "system", "content": FINAL_ANSWER_SYSTEM_PROMPT},
                     {"role": "user", "content": final_answer_user_prompt}
                 ],
-                temperature=0.5,
+                temperature=0.2,
                 max_tokens=1000
             )
             final_answer = response.choices[0].message.content.strip()
