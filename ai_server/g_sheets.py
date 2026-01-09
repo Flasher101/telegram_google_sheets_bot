@@ -149,29 +149,3 @@ def log_question(user_id: str, question: str, answer: str, response_time: float)
     except Exception as e:
         print(f"ERROR logging question to Google Sheets: {e}")
 
-def log_feedback(user_id: str, feedback: str):
-    """Logs user feedback to the 'User Feedback' worksheet."""
-    try:
-        client = _get_client()
-        workbook = client.open_by_key(GOOGLE_SHEETS_ID)
-        headers = ['timestamp', 'user_id', 'feedback']
-        sheet = _get_or_create_sheet_by_title(workbook, FEEDBACK_SHEET_TITLE, headers=headers)
-
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        sheet.append_row([timestamp, user_id, feedback], value_input_option='USER_ENTERED')
-        print(f"Feedback logged: user_id={user_id}, feedback={feedback}")
-    except Exception as e:
-        print(f"ERROR logging feedback to Google Sheets: {e}")
-
-
-def log_call_center_feedback(user_id: str, rating: int, comment: str, timestamp: str):
-    """Logs call center feedback to the 'Call Center Feedback' worksheet."""
-    try:
-        client = _get_client()
-        workbook = client.open_by_key(GOOGLE_SHEETS_ID)
-        headers = ['timestamp', 'user_id', 'rating', 'comment']
-        sheet = _get_or_create_sheet_by_title(workbook, CALL_CENTER_FEEDBACK_SHEET_TITLE, headers=headers)
-        sheet.append_row([timestamp, user_id, rating, comment], value_input_option='USER_ENTERED')
-        print(f"Call center feedback logged: user_id={user_id}, rating={rating}")
-    except Exception as e:
-        print(f"ERROR logging call center feedback to Google Sheets: {e}")
