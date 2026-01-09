@@ -71,10 +71,10 @@ def main_menu_keyboard():
 def call_center_keyboard():
     """Creates the keyboard for the 'Call Center' submenu."""
     # These will be read from config
-    from config import CALL_CENTER_WHATSAPP_NUMBER, CALL_CENTER_TELEGRAM_USERNAME
+    from config import CALL_CENTER_WHATSAPP_NUMBER, CALL_CENTER_TELEGRAM_NUMBER
     buttons = [
         [InlineKeyboardButton(text="💬 WhatsApp", url=f"https://wa.me/{CALL_CENTER_WHATSAPP_NUMBER}")],
-        [InlineKeyboardButton(text="✈️ Telegram", url=f"https://t.me/+{CALL_CENTER_TELEGRAM_USERNAME}")],
+        [InlineKeyboardButton(text="✈️ Telegram", url=f"https://t.me/+{CALL_CENTER_TELEGRAM_NUMBER}")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu")]
     ]
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
