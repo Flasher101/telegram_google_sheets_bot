@@ -18,6 +18,7 @@ KB_SHEET_INDEX = 0  # Knowledge base remains the first sheet
 USER_RECORDS_SHEET_TITLE = "User Records"
 INTERACTION_LOGS_SHEET_TITLE = "Interaction Logs"
 FEEDBACK_SHEET_TITLE = "User Feedback"
+CALL_CENTER_FEEDBACK_SHEET_TITLE = "Call Center Feedback"
 
 # --- Helper Functions ---
 
@@ -161,3 +162,16 @@ def log_feedback(user_id: str, feedback: str):
         print(f"Feedback logged: user_id={user_id}, feedback={feedback}")
     except Exception as e:
         print(f"ERROR logging feedback to Google Sheets: {e}")
+
+
+def log_call_center_feedback(user_id: str, rating: int, comment: str, timestamp: str):
+    """Logs call center feedback to the 'Call Center Feedback' worksheet."""
+    try:
+        client = _get_client()
+        workbook = client.open_by_key(GOOGLE_SHEETS_ID)
+        headers = ['timestamp', 'user_id', 'rating', 'comment']
+        sheet = _get_or_create_sheet_by_title(workbook, CALL_CENTER_FEEDBACK_SHEET_TITLE, headers=headers)
+        sheet.append_row([timestamp, user_id, rating, comment], value_input_option='USER_ENTERED')
+        print(f"Call center feedback logged: user_id={user_id}, rating={rating}")
+    except Exception as e:
+        print(f"ERROR logging call center feedback to Google Sheets: {e}")

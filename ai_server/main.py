@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from ai_server.g_sheets import get_all_records, get_user_records, add_record, log_question, log_feedback
+from ai_server.g_sheets import get_all_records, get_user_records, add_record, log_question, log_feedback, log_call_center_feedback
 from ai_server.vector_store import build_or_load_index, search_index
 import threading
 import time
@@ -36,6 +36,12 @@ class Record(BaseModel):
 class Feedback(BaseModel):
     user_id: str
     feedback: str # "good" or "bad"
+
+class CallCenterRating(BaseModel):
+    user_id: str
+    rating: int
+    comment: str = None
+    timestamp: str
 
 def update_index_periodically():
     """Фоновая задача для обновления индекса раз в час"""
@@ -124,6 +130,22 @@ def receive_feedback(feedback: Feedback):
     except Exception as e:
         logger.error(f"Failed to log feedback: {e}")
         raise HTTPException(status_code=500, detail="Failed to log feedback.")
+
+@app.post("/rating")
+def receive_call_center_rating(rating_data: CallCenterRating):
+    """Endpoint to receive and log call center rating."""
+    logger.info(f"Received call center rating from user_id={rating_data.user_id}: {rating_data.rating} stars")
+    try:
+        # Run in a separate thread to avoid blocking
+        log_thread = threading.Thread(
+            target=log_call_center_feedback,
+            args=(rating_data.user_id, rating_data.rating, rating_data.comment, rating_data.timestamp)
+        )
+        log_thread.start()
+        return {"status": "success"}
+    except Exception as e:
+        logger.error(f"Failed to log call center rating: {e}")
+        raise HTTPException(status_code=500, detail="Failed to log call center rating.")
 
 @app.get("/health")
 def health_check():
