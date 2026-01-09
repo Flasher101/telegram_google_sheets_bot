@@ -47,6 +47,7 @@ dp = Dispatcher(storage=storage)
 # Dictionary to keep track of feedback timers for each user
 feedback_timers = {}
 call_center_rating_timers = {}
+call_center_reminder_timers = {}
 
 class Form(StatesGroup):
     ai_consultation = State()
@@ -144,11 +145,28 @@ async def schedule_feedback(chat_id: int):
         # Remove the timer once the message is sent
         del feedback_timers[chat_id]
 
-async def schedule_call_center_rating(chat_id: int):
-    """Schedules a call center rating request to be sent after 3 hours."""
+async def schedule_call_center_reminder(user_id: int, chat_id: int):
+    """Schedules a reminder for call center rating after 24 hours."""
     try:
-        await asyncio.sleep(10)  # 3 часа = 10800 секунд
-        if chat_id in call_center_rating_timers:
+        await asyncio.sleep(86400) # 24 hours
+        if user_id in call_center_reminder_timers:
+            logger.info(f"Sending call center rating REMINDER to chat_id={chat_id}")
+            await bot.send_message(
+                chat_id,
+                "Здравствуйте! Напоминаем вам о возможности оценить ваше недавнее обращение в наш контакт-центр.\n"
+                "Ваше мнение очень важно для нас:",
+                reply_markup=call_center_rating_keyboard()
+            )
+            del call_center_reminder_timers[user_id]
+    except asyncio.CancelledError:
+        logger.info(f"Call center rating reminder cancelled for user_id={user_id}")
+
+
+async def schedule_call_center_rating(user_id: int, chat_id: int):
+    """Schedules a call center rating request to be sent after 3 hours and schedules a reminder."""
+    try:
+        await asyncio.sleep(10800)  # 3 hours
+        if user_id in call_center_rating_timers:
             logger.info(f"Sending call center rating request to chat_id={chat_id}")
             await bot.send_message(
                 chat_id,
@@ -156,9 +174,14 @@ async def schedule_call_center_rating(chat_id: int):
                 "Пожалуйста, оцените качество обслуживания:",
                 reply_markup=call_center_rating_keyboard()
             )
-            del call_center_rating_timers[chat_id]
+            # Once the initial request is sent, schedule the reminder
+            del call_center_rating_timers[user_id]
+            reminder_task = asyncio.create_task(schedule_call_center_reminder(user_id, chat_id))
+            call_center_reminder_timers[user_id] = reminder_task
+            logger.info(f"Scheduled call center rating REMINDER for user_id={user_id} in 24 hours")
+
     except asyncio.CancelledError:
-        logger.info(f"Call center rating timer cancelled for chat_id={chat_id}")
+        logger.info(f"Call center rating timer cancelled for user_id={user_id}")
 
 async def send_rating_to_server(user_id: int, rating: int, comment: str, timestamp):
     """Sends rating data to the AI server"""
@@ -363,15 +386,24 @@ async def show_call_center_menu(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
     chat_id = callback_query.message.chat.id
 
+    # Cancel any previously scheduled initial request
     if user_id in call_center_rating_timers:
         if not call_center_rating_timers[user_id].done():
             call_center_rating_timers[user_id].cancel()
         del call_center_rating_timers[user_id]
-        logger.info(f"Cancelled pending call center rating for user_id={user_id}")
+        logger.info(f"Cancelled pending initial call center rating for user_id={user_id}")
 
-    task = asyncio.create_task(schedule_call_center_rating(chat_id))
+    # Cancel any previously scheduled reminder
+    if user_id in call_center_reminder_timers:
+        if not call_center_reminder_timers[user_id].done():
+            call_center_reminder_timers[user_id].cancel()
+        del call_center_reminder_timers[user_id]
+        logger.info(f"Cancelled pending call center rating reminder for user_id={user_id}")
+
+    # Schedule a new initial request
+    task = asyncio.create_task(schedule_call_center_rating(user_id, chat_id))
     call_center_rating_timers[user_id] = task
-    logger.info(f"Scheduled call center rating for user_id={user_id} in 3 hours")
+    logger.info(f"Scheduled initial call center rating for user_id={user_id} in 3 hours")
 
     await callback_query.message.edit_text(
         "Выберите способ связи:",
@@ -385,6 +417,13 @@ async def process_call_center_rating(callback_query: types.CallbackQuery, state:
     rating = callback_query.data.split("_")[-1]
     user_id = callback_query.from_user.id
     logger.info(f"Received call center rating '{rating}' from user_id={user_id}")
+
+    # Cancel a pending reminder task if it exists
+    if user_id in call_center_reminder_timers:
+        if not call_center_reminder_timers[user_id].done():
+            call_center_reminder_timers[user_id].cancel()
+        del call_center_reminder_timers[user_id]
+        logger.info(f"User {user_id} responded to feedback, reminder cancelled.")
 
     await state.update_data(cc_rating=int(rating))
 
@@ -414,6 +453,14 @@ async def process_call_center_rating(callback_query: types.CallbackQuery, state:
 @dp.message(Form.awaiting_cc_feedback, F.text)
 async def process_cc_feedback_comment(msg: types.Message, state: FSMContext):
     """Processes the feedback comment from user after low rating"""
+    user_id = msg.from_user.id
+    # Cancel a pending reminder task if it exists
+    if user_id in call_center_reminder_timers:
+        if not call_center_reminder_timers[user_id].done():
+            call_center_reminder_timers[user_id].cancel()
+        del call_center_reminder_timers[user_id]
+        logger.info(f"User {user_id} provided comment, reminder cancelled.")
+
     user_data = await state.get_data()
     rating = user_data.get('cc_rating')
     comment = msg.text
@@ -437,6 +484,13 @@ async def skip_cc_feedback_comment(callback_query: types.CallbackQuery, state: F
     user_data = await state.get_data()
     rating = user_data.get('cc_rating')
     user_id = callback_query.from_user.id
+
+    # Cancel a pending reminder task if it exists
+    if user_id in call_center_reminder_timers:
+        if not call_center_reminder_timers[user_id].done():
+            call_center_reminder_timers[user_id].cancel()
+        del call_center_reminder_timers[user_id]
+        logger.info(f"User {user_id} skipped comment, reminder cancelled.")
 
     logger.info(f"User {user_id} skipped feedback comment for rating {rating}")
 
@@ -522,6 +576,10 @@ async def main():
                 task.cancel()
 
         for user_id, task in call_center_rating_timers.items():
+            if not task.done():
+                task.cancel()
+
+        for user_id, task in call_center_reminder_timers.items():
             if not task.done():
                 task.cancel()
 
