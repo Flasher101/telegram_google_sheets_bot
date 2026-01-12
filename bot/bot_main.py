@@ -1,6 +1,6 @@
 # bot/bot_main.py
 
-import requests
+import aiohttp
 import asyncio
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -46,10 +46,13 @@ dp = Dispatcher(storage=storage)
 
 # Dictionary to keep track of feedback timers for each user
 feedback_timers = {}
+call_center_rating_timers = {}
+call_center_reminder_timers = {}
 
 class Form(StatesGroup):
     ai_consultation = State()
     awaiting_clarification = State() # State for when the bot is waiting for user to clarify their question
+    awaiting_cc_feedback = State()
     question = State()
     name = State()
     phone = State()
@@ -68,10 +71,10 @@ def main_menu_keyboard():
 def call_center_keyboard():
     """Creates the keyboard for the 'Call Center' submenu."""
     # These will be read from config
-    from config import CALL_CENTER_WHATSAPP_NUMBER, CALL_CENTER_TELEGRAM_USERNAME
+    from config import CALL_CENTER_WHATSAPP_NUMBER, CALL_CENTER_TELEGRAM_NUMBER
     buttons = [
         [InlineKeyboardButton(text="💬 WhatsApp", url=f"https://wa.me/{CALL_CENTER_WHATSAPP_NUMBER}")],
-        [InlineKeyboardButton(text="✈️ Telegram", url=f"https://t.me/+{CALL_CENTER_TELEGRAM_USERNAME}")],
+        [InlineKeyboardButton(text="✈️ Telegram", url=f"https://t.me/+{CALL_CENTER_TELEGRAM_NUMBER}")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu")]
     ]
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -109,6 +112,26 @@ def feedback_keyboard():
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     return keyboard
 
+def call_center_rating_keyboard():
+    """Keyboard for rating call center service (1-5 stars)"""
+    buttons = [
+        [
+            InlineKeyboardButton(text="⭐ 1", callback_data="cc_rating_1"),
+            InlineKeyboardButton(text="⭐⭐ 2", callback_data="cc_rating_2"),
+            InlineKeyboardButton(text="⭐⭐⭐ 3", callback_data="cc_rating_3"),
+            InlineKeyboardButton(text="⭐⭐⭐⭐ 4", callback_data="cc_rating_4"),
+            InlineKeyboardButton(text="⭐⭐⭐⭐⭐ 5", callback_data="cc_rating_5")
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def skip_feedback_keyboard():
+    """Keyboard to skip providing feedback comment"""
+    buttons = [
+        [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_cc_feedback")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 async def schedule_feedback(chat_id: int):
     """Schedules a feedback message to be sent after a delay."""
     await asyncio.sleep(600)  # 10 minutes
@@ -121,6 +144,72 @@ async def schedule_feedback(chat_id: int):
         )
         # Remove the timer once the message is sent
         del feedback_timers[chat_id]
+
+async def schedule_call_center_reminder(user_id: int, chat_id: int):
+    """Schedules a reminder for call center rating after 24 hours."""
+    try:
+        await asyncio.sleep(86400) # 24 hours
+        if user_id in call_center_reminder_timers:
+            logger.info(f"Sending call center rating REMINDER to chat_id={chat_id}")
+            await bot.send_message(
+                chat_id,
+                "Здравствуйте! Напоминаем вам о возможности оценить ваше недавнее обращение в наш контакт-центр.\n"
+                "Ваше мнение очень важно для нас:",
+                reply_markup=call_center_rating_keyboard()
+            )
+            del call_center_reminder_timers[user_id]
+    except asyncio.CancelledError:
+        logger.info(f"Call center rating reminder cancelled for user_id={user_id}")
+
+
+async def schedule_call_center_rating(user_id: int, chat_id: int):
+    """Schedules a call center rating request to be sent after 3 hours and schedules a reminder."""
+    try:
+        await asyncio.sleep(10800)  # 3 hours
+        if user_id in call_center_rating_timers:
+            logger.info(f"Sending call center rating request to chat_id={chat_id}")
+            await bot.send_message(
+                chat_id,
+                "Здравствуйте! Вы недавно обращались в наш контакт-центр.\n"
+                "Пожалуйста, оцените качество обслуживания:",
+                reply_markup=call_center_rating_keyboard()
+            )
+            # Once the initial request is sent, schedule the reminder
+            del call_center_rating_timers[user_id]
+            reminder_task = asyncio.create_task(schedule_call_center_reminder(user_id, chat_id))
+            call_center_reminder_timers[user_id] = reminder_task
+            logger.info(f"Scheduled call center rating REMINDER for user_id={user_id} in 24 hours")
+
+    except asyncio.CancelledError:
+        logger.info(f"Call center rating timer cancelled for user_id={user_id}")
+
+async def send_rating_to_server(user_id: int, rating: int, comment: str, timestamp):
+    """Sends rating data to the AI server"""
+    try:
+        payload = {
+            "user_id": str(user_id),
+            "rating": rating,
+            "comment": comment,
+            "timestamp": str(timestamp)
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{AI_SERVER_URL}/rating",
+                json=payload,
+                timeout=15
+            ) as response:
+                response.raise_for_status()
+                logger.info(
+                    f"Call center rating sent to server for user_id={user_id} "
+                    f"(rating={rating}, has_comment={comment is not None})"
+                )
+                return True
+    except aiohttp.ClientError as e:
+        logger.error(f"Failed to send rating to server for user_id={user_id}: {e}")
+        return False
+    except Exception as e:
+        logger.critical(f"Unexpected error in send_rating_to_server: {e}", exc_info=True)
+        return False
 
 # --- Handlers ---
 @dp.message(Command("start"))
@@ -195,33 +284,30 @@ async def process_ai_question(msg: types.Message, state: FSMContext):
             "question": question_text,
             "user_id": str(msg.from_user.id)
         }
-        response = requests.post(f"{AI_SERVER_URL}/ask", json=payload, timeout=60) # Increased timeout for LLM
-        response.raise_for_status()
-        data = response.json()
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{AI_SERVER_URL}/ask", json=payload, timeout=60) as response:
+                response.raise_for_status()
+                data = await response.json()
 
-        response_type = data.get("type")
-        content = data.get("content")
+                response_type = data.get("type")
+                content = data.get("content")
 
-        if response_type == "clarification":
-            # Store the original question and switch state
-            await state.update_data(original_question=question_text)
-            await state.set_state(Form.awaiting_clarification)
-            await msg.answer(content)
-            logger.info(f"Sent clarification request to user {msg.from_user.id}. New state: awaiting_clarification.")
-        elif response_type == "answer":
-            await msg.answer(content)
-        else:
-            await msg.answer("Получен неожиданный ответ от сервера. Попробуйте позже.")
+                if response_type == "clarification":
+                    await state.update_data(original_question=question_text)
+                    await state.set_state(Form.awaiting_clarification)
+                    await msg.answer(content)
+                    logger.info(f"Sent clarification request to user {msg.from_user.id}. New state: awaiting_clarification.")
+                elif response_type == "answer":
+                    await msg.answer(content)
+                else:
+                    await msg.answer("Получен неожиданный ответ от сервера. Попробуйте позже.")
 
-    except requests.exceptions.Timeout:
-        logger.error(f"API Error: Timeout when requesting {AI_SERVER_URL}")
-        await msg.answer("Сервер слишком долго не отвечает. Попробуйте еще раз позже.")
-    except requests.exceptions.ConnectionError:
-        logger.error(f"API Error: Could not connect to {AI_SERVER_URL}")
-        await msg.answer("Ошибка: AI-сервер недоступен. Свяжитесь с администратором.")
-    except requests.exceptions.RequestException as e:
+    except aiohttp.ClientError as e:
         logger.error(f"API Error: {e}")
         await msg.answer("Произошла ошибка при обработке вашего запроса. Попробуйте позже.")
+    except asyncio.TimeoutError:
+        logger.error(f"API Error: Timeout when requesting {AI_SERVER_URL}")
+        await msg.answer("Сервер слишком долго не отвечает. Попробуйте еще раз позже.")
 
 
 # Handler for when the bot is waiting for the user to clarify their ambiguous question
@@ -251,19 +337,18 @@ async def process_clarification(msg: types.Message, state: FSMContext):
             "question": enriched_question,
             "user_id": str(msg.from_user.id)
         }
-        response = requests.post(f"{AI_SERVER_URL}/ask", json=payload, timeout=60)
-        response.raise_for_status()
-        data = response.json()
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{AI_SERVER_URL}/ask", json=payload, timeout=60) as response:
+                response.raise_for_status()
+                data = await response.json()
+                await msg.answer(data.get("content", "Не удалось получить окончательный ответ от сервера."))
 
-        # By now, the answer should be direct and not a clarification
-        await msg.answer(data.get("content", "Не удалось получить окончательный ответ от сервера."))
-
-    except requests.exceptions.Timeout:
-        logger.error(f"API Error: Timeout when requesting enriched answer from {AI_SERVER_URL}")
-        await msg.answer("Сервер не ответил вовремя. Попробуйте задать вопрос еще раз.")
-    except requests.exceptions.RequestException as e:
+    except aiohttp.ClientError as e:
         logger.error(f"API Error on enriched query: {e}")
         await msg.answer("Произошла ошибка при обработке вашего уточненного запроса.")
+    except asyncio.TimeoutError:
+        logger.error(f"API Error: Timeout when requesting enriched answer from {AI_SERVER_URL}")
+        await msg.answer("Сервер не ответил вовремя. Попробуйте задать вопрос еще раз.")
 
 
 # Старый обработчик вопроса (больше не используется, можно удалить)
@@ -281,10 +366,11 @@ async def process_feedback(callback_query: types.CallbackQuery):
     # Send feedback to the AI server
     try:
         payload = {"user_id": str(user_id), "feedback": feedback_type}
-        response = requests.post(f"{AI_SERVER_URL}/feedback", json=payload, timeout=15)
-        response.raise_for_status()
-        logger.info(f"Feedback successfully sent to AI server for user_id={user_id}")
-    except requests.exceptions.RequestException as e:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{AI_SERVER_URL}/feedback", json=payload, timeout=15) as response:
+                response.raise_for_status()
+                logger.info(f"Feedback successfully sent to AI server for user_id={user_id}")
+    except aiohttp.ClientError as e:
         logger.error(f"Failed to send feedback to AI server for user_id={user_id}: {e}")
 
     # Thank the user and remove the inline keyboard
@@ -296,12 +382,126 @@ async def process_feedback(callback_query: types.CallbackQuery):
 
 @dp.callback_query(F.data == "call_center")
 async def show_call_center_menu(callback_query: types.CallbackQuery):
-    """Shows the call center contact submenu."""
+    """Shows the call center contact submenu and schedules rating request."""
+    user_id = callback_query.from_user.id
+    chat_id = callback_query.message.chat.id
+
+    # Cancel any previously scheduled initial request
+    if user_id in call_center_rating_timers:
+        if not call_center_rating_timers[user_id].done():
+            call_center_rating_timers[user_id].cancel()
+        del call_center_rating_timers[user_id]
+        logger.info(f"Cancelled pending initial call center rating for user_id={user_id}")
+
+    # Cancel any previously scheduled reminder
+    if user_id in call_center_reminder_timers:
+        if not call_center_reminder_timers[user_id].done():
+            call_center_reminder_timers[user_id].cancel()
+        del call_center_reminder_timers[user_id]
+        logger.info(f"Cancelled pending call center rating reminder for user_id={user_id}")
+
+    # Schedule a new initial request
+    task = asyncio.create_task(schedule_call_center_rating(user_id, chat_id))
+    call_center_rating_timers[user_id] = task
+    logger.info(f"Scheduled initial call center rating for user_id={user_id} in 3 hours")
+
     await callback_query.message.edit_text(
         "Выберите способ связи:",
         reply_markup=call_center_keyboard()
     )
     await callback_query.answer()
+
+@dp.callback_query(F.data.startswith("cc_rating_"))
+async def process_call_center_rating(callback_query: types.CallbackQuery, state: FSMContext):
+    """Processes call center rating feedback"""
+    rating = callback_query.data.split("_")[-1]
+    user_id = callback_query.from_user.id
+    logger.info(f"Received call center rating '{rating}' from user_id={user_id}")
+
+    # Cancel a pending reminder task if it exists
+    if user_id in call_center_reminder_timers:
+        if not call_center_reminder_timers[user_id].done():
+            call_center_reminder_timers[user_id].cancel()
+        del call_center_reminder_timers[user_id]
+        logger.info(f"User {user_id} responded to feedback, reminder cancelled.")
+
+    await state.update_data(cc_rating=int(rating))
+
+    if int(rating) <= 2:
+        await state.set_state(Form.awaiting_cc_feedback)
+        await callback_query.message.edit_text(
+            f"Спасибо за вашу оценку ({rating} ⭐).\n\n"
+            "Нам очень важно понять, что пошло не так.\n"
+            "Пожалуйста, опишите подробнее, что вам не понравилось в обслуживании:",
+            reply_markup=skip_feedback_keyboard()
+        )
+        await callback_query.answer()
+        logger.info(f"User {user_id} gave low rating, waiting for feedback comment")
+        return
+
+    await send_rating_to_server(user_id, int(rating), None, callback_query.message.date)
+
+    if int(rating) >= 4:
+        thank_you_message = f"Спасибо за высокую оценку! ⭐ {rating}\nМы рады, что смогли вам помочь!"
+    else:
+        thank_you_message = f"Спасибо за вашу оценку! ⭐ {rating}\nМы работаем над улучшением нашего сервиса."
+
+    await callback_query.message.edit_text(thank_you_message)
+    await callback_query.answer()
+    await state.clear()
+
+@dp.message(Form.awaiting_cc_feedback, F.text)
+async def process_cc_feedback_comment(msg: types.Message, state: FSMContext):
+    """Processes the feedback comment from user after low rating"""
+    user_id = msg.from_user.id
+    # Cancel a pending reminder task if it exists
+    if user_id in call_center_reminder_timers:
+        if not call_center_reminder_timers[user_id].done():
+            call_center_reminder_timers[user_id].cancel()
+        del call_center_reminder_timers[user_id]
+        logger.info(f"User {user_id} provided comment, reminder cancelled.")
+
+    user_data = await state.get_data()
+    rating = user_data.get('cc_rating')
+    comment = msg.text
+
+    logger.info(f"User {msg.from_user.id} provided feedback comment for rating {rating}")
+
+    await send_rating_to_server(msg.from_user.id, rating, comment, msg.date)
+
+    await msg.answer(
+        "Спасибо за ваш отзыв! 🙏\n\n"
+        "Мы обязательно учтём ваши замечания и постараемся улучшить качество обслуживания.\n"
+        "Ваше мнение очень важно для нас!",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+
+    await state.clear()
+
+@dp.callback_query(F.data == "skip_cc_feedback", Form.awaiting_cc_feedback)
+async def skip_cc_feedback_comment(callback_query: types.CallbackQuery, state: FSMContext):
+    """Handles when user skips providing feedback comment"""
+    user_data = await state.get_data()
+    rating = user_data.get('cc_rating')
+    user_id = callback_query.from_user.id
+
+    # Cancel a pending reminder task if it exists
+    if user_id in call_center_reminder_timers:
+        if not call_center_reminder_timers[user_id].done():
+            call_center_reminder_timers[user_id].cancel()
+        del call_center_reminder_timers[user_id]
+        logger.info(f"User {user_id} skipped comment, reminder cancelled.")
+
+    logger.info(f"User {user_id} skipped feedback comment for rating {rating}")
+
+    await send_rating_to_server(user_id, rating, None, callback_query.message.date)
+
+    await callback_query.message.edit_text(
+        "Спасибо за вашу оценку! 🙏\n\n"
+        "Мы постараемся улучшить качество нашего обслуживания."
+    )
+    await callback_query.answer()
+    await state.clear()
 
 @dp.callback_query(F.data == "instructions")
 async def show_instructions_menu(callback_query: types.CallbackQuery):
@@ -365,9 +565,26 @@ async def send_instruction_document(callback_query: types.CallbackQuery):
 
 async def main():
     logger.info("Бот запускается...")
-    # This will skip updates which were sent when the bot was offline
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        await dp.start_polling(bot)
+    finally:
+        logger.info("Shutting down bot...")
+
+        for chat_id, task in feedback_timers.items():
+            if not task.done():
+                task.cancel()
+
+        for user_id, task in call_center_rating_timers.items():
+            if not task.done():
+                task.cancel()
+
+        for user_id, task in call_center_reminder_timers.items():
+            if not task.done():
+                task.cancel()
+
+        await bot.session.close()
+        logger.info("Bot shutdown complete")
 
 if __name__ == "__main__":
     try:

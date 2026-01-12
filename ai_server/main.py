@@ -2,13 +2,17 @@
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from ai_server.g_sheets import get_all_records, get_user_records, add_record, log_question, log_feedback
+from ai_server.g_sheets import get_all_records, get_user_records, add_record, log_question
 from ai_server.vector_store import build_or_load_index, search_index
 import threading
 import time
 import uvicorn
 import logging
 from logging.handlers import RotatingFileHandler
+import os
+import json
+import asyncio
+from datetime import datetime
 
 # --- Logging Setup ---
 log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -21,6 +25,17 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 logger.addHandler(log_handler)
 logger.addHandler(logging.StreamHandler())
+
+# --- JSON Feedback Storage ---
+DATA_DIR = "data"
+AI_FEEDBACK_FILE = os.path.join(DATA_DIR, "ai_feedback.json")
+CC_FEEDBACK_FILE = os.path.join(DATA_DIR, "call_center_feedback.json")
+ai_feedback_lock = asyncio.Lock()
+cc_feedback_lock = asyncio.Lock()
+
+# Ensure data directory exists
+os.makedirs(DATA_DIR, exist_ok=True)
+
 
 app = FastAPI(title="AI Server (Google Sheets + FAISS)")
 
@@ -36,6 +51,12 @@ class Record(BaseModel):
 class Feedback(BaseModel):
     user_id: str
     feedback: str # "good" or "bad"
+
+class CallCenterRating(BaseModel):
+    user_id: str
+    rating: int
+    comment: str = None
+    timestamp: str
 
 def update_index_periodically():
     """Фоновая задача для обновления индекса раз в час"""
@@ -115,15 +136,62 @@ def create_record(record: Record):
     return {"status": "success", "record": record}
 
 @app.post("/feedback")
-def receive_feedback(feedback: Feedback):
-    """Endpoint to receive and log user feedback."""
+async def receive_feedback(feedback: Feedback):
+    """Endpoint to receive and log user feedback to a JSON file."""
     logger.info(f"Received feedback from user_id={feedback.user_id}: {feedback.feedback}")
-    try:
-        log_feedback(user_id=feedback.user_id, feedback=feedback.feedback)
-        return {"status": "success"}
-    except Exception as e:
-        logger.error(f"Failed to log feedback: {e}")
-        raise HTTPException(status_code=500, detail="Failed to log feedback.")
+
+    new_entry = {
+        "user_id": feedback.user_id,
+        "feedback": feedback.feedback,
+        "timestamp": datetime.now().isoformat()
+    }
+
+    async with ai_feedback_lock:
+        try:
+            # Read existing data or initialize if file doesn't exist
+            if os.path.exists(AI_FEEDBACK_FILE) and os.path.getsize(AI_FEEDBACK_FILE) > 0:
+                with open(AI_FEEDBACK_FILE, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            else:
+                data = []
+
+            # Append new entry and write back
+            data.append(new_entry)
+
+            with open(AI_FEEDBACK_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=4)
+
+            return {"status": "success"}
+        except Exception as e:
+            logger.error(f"Failed to log feedback to JSON: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to log feedback.")
+
+@app.post("/rating")
+async def receive_call_center_rating(rating_data: CallCenterRating):
+    """Endpoint to receive and log call center rating to a JSON file."""
+    logger.info(f"Received call center rating from user_id={rating_data.user_id}: {rating_data.rating} stars")
+
+    new_entry = rating_data.dict()
+
+    async with cc_feedback_lock:
+        try:
+            # Read existing data or initialize if file doesn't exist
+            if os.path.exists(CC_FEEDBACK_FILE) and os.path.getsize(CC_FEEDBACK_FILE) > 0:
+                with open(CC_FEEDBACK_FILE, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            else:
+                data = []
+
+            # Append new entry and write back
+            data.append(new_entry)
+
+            with open(CC_FEEDBACK_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=4)
+
+            return {"status": "success"}
+        except Exception as e:
+            logger.error(f"Failed to log call center rating to JSON: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to log call center rating.")
 
 @app.get("/health")
 def health_check():
